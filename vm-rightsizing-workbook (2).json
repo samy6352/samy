@@ -1,0 +1,236 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🖥️ VM Right-Sizing — CPU & Memory Utilization\n\nIdentify **over-provisioned virtual machines** that are candidates for downsizing, based on CPU and memory utilization over the selected time range.\n\n**Right-sizing logic:** a VM is a *Downsize candidate* when its **average CPU AND average memory are both below the threshold** set below (default 40%). A VM whose **P95 (peak) CPU or memory reaches 80%+** is flagged *Consider upsizing*. Everything else is *Right-sized*.\n\n**Which grid do I read?** VMs send data to one of two tables depending on the monitoring agent. **Step 1** below tells you which one your VMs use — then read the matching grid (**2a** for `Perf`, **2b** for VM Insights). By default all accessible subscriptions and workspaces are analyzed.\n\n---"
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "param-timerange",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                { "durationMs": 86400000 },
+                { "durationMs": 259200000 },
+                { "durationMs": 604800000 },
+                { "durationMs": 1209600000 },
+                { "durationMs": 2592000000 }
+              ],
+              "allowCustom": true
+            },
+            "timeContext": { "durationMs": 604800000 },
+            "value": { "durationMs": 604800000 }
+          },
+          {
+            "id": "param-subscription",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscription",
+            "label": "Subscription",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| project value = strcat('/subscriptions/', subscriptionId), label = name\n| order by label asc",
+            "crossComponentResources": ["value::all"],
+            "typeSettings": {
+              "additionalResourceOptions": ["value::all"],
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "value": ["value::all"]
+          },
+          {
+            "id": "param-workspaces",
+            "version": "KqlParameterItem/1.0",
+            "name": "Workspaces",
+            "label": "Log Analytics workspace(s)",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resources\n| where type =~ 'microsoft.operationalinsights/workspaces'\n| project value = id, label = name\n| order by label asc",
+            "crossComponentResources": ["{Subscription}"],
+            "typeSettings": {
+              "additionalResourceOptions": ["value::all"],
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "value": ["value::all"]
+          },
+          {
+            "id": "param-cputhreshold",
+            "version": "KqlParameterItem/1.0",
+            "name": "CPUThreshold",
+            "label": "CPU average threshold (%)",
+            "type": 1,
+            "isRequired": true,
+            "value": "40"
+          },
+          {
+            "id": "param-memthreshold",
+            "version": "KqlParameterItem/1.0",
+            "name": "MemThreshold",
+            "label": "Memory average threshold (%)",
+            "type": 1,
+            "isRequired": true,
+            "value": "40"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "union isfuzzy=true\n    (Perf | summarize Records = count(), VMs = dcount(Computer) | extend [\"Data source\"] = \"Perf  (legacy Log Analytics agent / custom Perf DCR)\"),\n    (InsightsMetrics | where Origin == \"vm.azm.ms\" | summarize Records = count(), VMs = dcount(Computer) | extend [\"Data source\"] = \"InsightsMetrics  (VM Insights / Azure Monitor Agent)\")\n| project [\"Data source\"], VMs, Records\n| order by Records desc",
+        "size": 4,
+        "title": "Step 1 · Telemetry availability — which table your VMs report to",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspaces}"],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            { "columnMatch": "VMs", "formatter": 8, "formatOptions": { "palette": "blue" } },
+            { "columnMatch": "Records", "formatter": 8, "formatOptions": { "palette": "blue" } }
+          ]
+        }
+      },
+      "name": "diagnostic"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "> Read the grid whose **Data source** shows VMs above. If **Perf** has 0 VMs but **InsightsMetrics** has VMs, your fleet uses the Azure Monitor Agent — use **grid 2b**. If neither has VMs, the selected workspaces aren't receiving VM performance telemetry yet."
+      },
+      "name": "diagnostic-note"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let cpuThreshold = {CPUThreshold};\nlet memThreshold = {MemThreshold};\nlet cpu = Perf\n| where ObjectName in (\"Processor\", \"Processor Information\") and CounterName == \"% Processor Time\" and InstanceName == \"_Total\"\n| summarize AvgCPU = round(avg(CounterValue), 1), P95CPU = round(percentile(CounterValue, 95), 1), MaxCPU = round(max(CounterValue), 1) by Computer;\nlet mem = Perf\n| where ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\")\n| summarize AvgMem = round(avg(CounterValue), 1), P95Mem = round(percentile(CounterValue, 95), 1), MaxMem = round(max(CounterValue), 1) by Computer;\ncpu\n| join kind=leftouter (mem) on Computer\n| extend Recommendation = case(\n    AvgCPU < cpuThreshold and (isempty(AvgMem) or AvgMem < memThreshold), \"Downsize candidate\",\n    P95CPU >= 80 or P95Mem >= 80, \"Consider upsizing\",\n    \"Right-sized\")\n| project Computer, [\"Avg CPU %\"] = AvgCPU, [\"P95 CPU %\"] = P95CPU, [\"Max CPU %\"] = MaxCPU, [\"Avg Mem %\"] = AvgMem, [\"P95 Mem %\"] = P95Mem, [\"Max Mem %\"] = MaxMem, Recommendation\n| order by [\"Avg CPU %\"] asc",
+        "size": 2,
+        "title": "Step 2a · Right-sizing via Perf counters  (downsize when Avg CPU & Avg Mem both < threshold)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspaces}"],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            { "columnMatch": "Avg CPU %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            { "columnMatch": "P95 CPU %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            { "columnMatch": "Avg Mem %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            { "columnMatch": "P95 Mem %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            {
+              "columnMatch": "Recommendation",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  { "operator": "==", "thresholdValue": "Downsize candidate", "representation": "warning", "text": "{0}" },
+                  { "operator": "==", "thresholdValue": "Consider upsizing", "representation": "error", "text": "{0}" },
+                  { "operator": "Default", "thresholdValue": null, "representation": "success", "text": "{0}" }
+                ]
+              }
+            }
+          ],
+          "rowLimit": 1000,
+          "filter": true
+        }
+      },
+      "name": "grid-perf"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let cpuThreshold = {CPUThreshold};\nlet cpu = InsightsMetrics\n| where Origin == \"vm.azm.ms\" and Namespace == \"Processor\" and Name == \"UtilizationPercentage\"\n| summarize AvgCPU = round(avg(Val), 1), P95CPU = round(percentile(Val, 95), 1), MaxCPU = round(max(Val), 1) by Computer;\nlet mem = InsightsMetrics\n| where Origin == \"vm.azm.ms\" and Namespace == \"Memory\" and Name == \"AvailableMB\"\n| summarize AvgAvailGB = round(avg(Val) / 1024, 2), MinAvailGB = round(min(Val) / 1024, 2) by Computer;\ncpu\n| join kind=leftouter (mem) on Computer\n| extend Recommendation = case(\n    AvgCPU < cpuThreshold, \"Downsize candidate\",\n    P95CPU >= 80, \"Consider upsizing\",\n    \"Right-sized\")\n| project Computer, [\"Avg CPU %\"] = AvgCPU, [\"P95 CPU %\"] = P95CPU, [\"Max CPU %\"] = MaxCPU, [\"Avg Avail Mem (GB)\"] = AvgAvailGB, [\"Min Avail Mem (GB)\"] = MinAvailGB, Recommendation\n| order by [\"Avg CPU %\"] asc",
+        "size": 2,
+        "title": "Step 2b · Right-sizing via VM Insights / InsightsMetrics  (downsize when Avg CPU < threshold; verify memory via available GB)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspaces}"],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            { "columnMatch": "Avg CPU %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            { "columnMatch": "P95 CPU %", "formatter": 8, "formatOptions": { "palette": "greenRed" } },
+            { "columnMatch": "Min Avail Mem (GB)", "formatter": 8, "formatOptions": { "palette": "redGreen" } },
+            {
+              "columnMatch": "Recommendation",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "icons",
+                "thresholdsGrid": [
+                  { "operator": "==", "thresholdValue": "Downsize candidate", "representation": "warning", "text": "{0}" },
+                  { "operator": "==", "thresholdValue": "Consider upsizing", "representation": "error", "text": "{0}" },
+                  { "operator": "Default", "thresholdValue": null, "representation": "success", "text": "{0}" }
+                ]
+              }
+            }
+          ],
+          "rowLimit": 1000,
+          "filter": true
+        }
+      },
+      "name": "grid-vminsights"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "union isfuzzy=true\n    (Perf | where ObjectName in (\"Processor\", \"Processor Information\") and CounterName == \"% Processor Time\" and InstanceName == \"_Total\" | project Computer, CPU = CounterValue),\n    (InsightsMetrics | where Origin == \"vm.azm.ms\" and Namespace == \"Processor\" and Name == \"UtilizationPercentage\" | project Computer, CPU = Val)\n| summarize [\"Avg CPU %\"] = round(avg(CPU), 1) by Computer\n| top 20 by [\"Avg CPU %\"] asc",
+        "size": 1,
+        "title": "Top 20 least-utilized VMs (by Avg CPU)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspaces}"],
+        "visualization": "barchart"
+      },
+      "customWidth": "50",
+      "name": "chart-underutilized"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let cpuThreshold = {CPUThreshold};\nlet memThreshold = {MemThreshold};\nlet cpu = union isfuzzy=true\n    (Perf | where ObjectName in (\"Processor\", \"Processor Information\") and CounterName == \"% Processor Time\" and InstanceName == \"_Total\" | project Computer, CPU = CounterValue),\n    (InsightsMetrics | where Origin == \"vm.azm.ms\" and Namespace == \"Processor\" and Name == \"UtilizationPercentage\" | project Computer, CPU = Val)\n| summarize AvgCPU = avg(CPU), P95CPU = percentile(CPU, 95) by Computer;\nlet mem = Perf\n| where ObjectName == \"Memory\" and CounterName in (\"% Committed Bytes In Use\", \"% Used Memory\")\n| summarize AvgMem = avg(CounterValue), P95Mem = percentile(CounterValue, 95) by Computer;\ncpu\n| join kind=leftouter (mem) on Computer\n| extend Recommendation = case(\n    AvgCPU < cpuThreshold and (isempty(AvgMem) or AvgMem < memThreshold), \"Downsize candidate\",\n    P95CPU >= 80 or P95Mem >= 80, \"Consider upsizing\",\n    \"Right-sized\")\n| summarize Count = count() by Recommendation",
+        "size": 1,
+        "title": "Fleet recommendation distribution",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspaces}"],
+        "visualization": "piechart"
+      },
+      "customWidth": "50",
+      "name": "chart-distribution"
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

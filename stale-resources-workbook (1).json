@@ -1,0 +1,1812 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# \ud83e\uddf9 Stale & Orphaned Resource Finder\nFinds Azure resources that are provisioned but unused \u2014 unattached disks, orphan IPs/NICs/NSGs, empty App Service plans, stopped VMs, old snapshots and empty resource groups.\n\nSelect subscriptions and a staleness threshold below, then work through the tabs."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": [
+          "value::selected"
+        ],
+        "parameters": [
+          {
+            "id": "22614ece-7799-4103-9c9a-bffec84db6ff",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "781e3103-34fb-44c2-8152-e6d71265c325",
+            "version": "KqlParameterItem/1.0",
+            "name": "ResourceGroups",
+            "label": "Resource groups",
+            "type": 2,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "isRequired": true,
+            "query": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' | project value = tolower(name), label = name | order by label asc",
+            "crossComponentResources": [
+              "{Subscriptions}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "4d029821-c4bf-4ce1-8409-a6bcccffaea2",
+            "version": "KqlParameterItem/1.0",
+            "name": "StaleDays",
+            "label": "Stale threshold (days)",
+            "type": 2,
+            "isRequired": true,
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "jsonData": "[\"7\",\"14\",\"30\",\"60\",\"90\",\"180\",\"365\"]",
+            "value": "90"
+          },
+          {
+            "id": "c1e6b660-401a-492e-a15f-a6171d0ce379",
+            "version": "KqlParameterItem/1.0",
+            "name": "TagName",
+            "label": "Exclude resources with tag (optional)",
+            "type": 1,
+            "isRequired": false,
+            "value": "donotdelete"
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "\ud83d\udcb0 **Estimated unit prices** \u2014 defaults are approximate US East list prices. Adjust to match your region, currency and any discounts (EA/CSP/reservations). All cost columns are *estimates*, not billed amounts; the **Cost** tab pulls real month-to-date spend from Cost Management."
+      },
+      "name": "price-note"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "8a113af5-a723-4652-b7a4-4ab698db8db6",
+            "version": "KqlParameterItem/1.0",
+            "name": "Currency",
+            "label": "Currency",
+            "type": 2,
+            "isRequired": true,
+            "jsonData": "[\"USD\",\"INR\",\"EUR\",\"GBP\",\"AUD\"]",
+            "value": "USD",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            }
+          },
+          {
+            "id": "2226c768-c4e0-4681-b4f3-6bfb92d58e4a",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskPremium",
+            "label": "Premium SSD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.135",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "7fdaa8b1-2367-4005-9af5-a20e1875a94f",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskSSD",
+            "label": "Standard SSD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.075",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "0acafcbb-c91a-4adc-a920-c83f78f3e55b",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskHDD",
+            "label": "Standard HDD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.045",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "2daa5a70-32de-486a-bbb5-2037c8ab0764",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskUltra",
+            "label": "Ultra disk /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.20",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "814778ef-3ceb-4892-b8c9-5451130df661",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceSnapshot",
+            "label": "Snapshot /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.05",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "c8c6c8cd-2866-4764-8b78-61a23346fc1a",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePublicIP",
+            "label": "Public IP /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "3.65",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "1f210722-a256-42cb-9716-f169d22c8c9a",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceLB",
+            "label": "Load balancer /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "18.25",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "0124f1fc-da10-460d-8917-1e567b2b7528",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceAppGw",
+            "label": "App gateway /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "180",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "24c4b2ee-b293-41ee-b85c-613069eb1868",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceVMHour",
+            "label": "Stopped VM /hour (avg)",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.10",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "4612aa99-9d15-4d5c-b22b-a8737b8e9872",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanBasic",
+            "label": "App plan Basic /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "55",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "7efb28b4-a042-4269-bf9c-4f214a59f590",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanStandard",
+            "label": "App plan Standard /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "75",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "b87db6cc-71a5-47d8-98ff-2b7c6f595446",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanPremium",
+            "label": "App plan Premium /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "150",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          },
+          {
+            "id": "935a7c1a-abe5-432b-8336-7f5ffb92ff4d",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanIsolated",
+            "label": "App plan Isolated /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "700",
+            "typeSettings": {
+              "paramValidationRules": []
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "price-parameters"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "98c649bb-a0fe-402b-ad2f-2f1a21ccbd06",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Overview",
+            "subTarget": "overview",
+            "preText": "",
+            "style": "link"
+          },
+          {
+            "id": "8b653ddd-3c61-44c0-91f2-04453760f5e2",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Cost",
+            "subTarget": "cost",
+            "style": "link"
+          },
+          {
+            "id": "71fb4f9a-1356-4519-be0d-252b89492830",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Compute",
+            "subTarget": "compute",
+            "style": "link"
+          },
+          {
+            "id": "5385c471-6039-4676-8040-5b76669dc25c",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Storage & Disks",
+            "subTarget": "storage",
+            "style": "link"
+          },
+          {
+            "id": "79e024c9-83c7-432b-8d2f-b08d48da1be0",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Networking",
+            "subTarget": "network",
+            "style": "link"
+          },
+          {
+            "id": "e07d553c-5552-4d7e-9639-e0420984cf4b",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "App & Data",
+            "subTarget": "appdata",
+            "style": "link"
+          },
+          {
+            "id": "3e125bef-eb48-4800-8a0d-ec7d0951f9cf",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "No Recent Change",
+            "subTarget": "nochange",
+            "style": "link"
+          },
+          {
+            "id": "db49b832-adad-4781-8c70-8291d4e46c3e",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Empty RGs & Orphans",
+            "subTarget": "empty",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Stale & orphaned Azure resources\nResources that are provisioned but not doing useful work. Use the tabs to drill into each category, then export to Excel for clean-up tracking.\n\n> Data source: Azure Resource Graph (near real-time). Always validate with the resource owner before deleting anything."
+            },
+            "name": "overview-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Flagged = case(\n    type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached', 1,\n    type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway), 1,\n    type =~ 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint), 1,\n    type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets), 1,\n    type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d), 1,\n    type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0, 1,\n    type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0, 1,\n    type =~ 'microsoft.network/applicationgateways' and array_length(properties.backendAddressPools) == 0, 1,\n    type =~ 'microsoft.compute/virtualmachines' and tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/stopped', 1,\n    0)\n| where Flagged == 1\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| summarize ['Stale resources'] = count(),\n            ['Est. monthly cost'] = round(sum(['Est. monthly cost']), 2),\n            ['Est. annual cost'] = round(sum(['Est. monthly cost']) * 12, 2),\n            ['Unattached disk GB'] = sum(iff(type =~ 'microsoft.compute/disks', toint(properties.diskSizeGB), 0))\n",
+              "size": 4,
+              "title": "Headline \u2014 estimated waste ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "showBorder": true,
+                "titleContent": {
+                  "columnMatch": "Stale resources",
+                  "formatter": 12
+                },
+                "leftContent": {
+                  "columnMatch": "Est. monthly cost",
+                  "formatter": 12,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 0
+                    }
+                  }
+                }
+              }
+            },
+            "name": "overview-tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend cat = case(\n    type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached', 'Unattached managed disks',\n    type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway), 'Unassociated public IPs',\n    type =~ 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint), 'Unattached network interfaces',\n    type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets), 'Unused NSGs',\n    type =~ 'microsoft.network/routetables' and isnull(properties.subnets), 'Unused route tables',\n    type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d), 'Snapshots older than {StaleDays}d',\n    type =~ 'microsoft.compute/availabilitysets' and array_length(properties.virtualMachines) == 0, 'Empty availability sets',\n    type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0, 'App Service plans with no apps',\n    type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0, 'Load balancers with no backend',\n    type =~ 'microsoft.network/applicationgateways' and array_length(properties.backendAddressPools) == 0, 'App Gateways with no backend',\n    type =~ 'microsoft.compute/virtualmachines' and tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/stopped', 'VMs stopped (still billed)',\n    '')\n| where isnotempty(cat)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| summarize Resources = count(), ['Est. monthly cost'] = round(sum(['Est. monthly cost']), 2) by ['Stale category'] = cat\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "Estimated monthly waste by category ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [],
+                "filter": true
+              }
+            },
+            "name": "overview-cat"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where (type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached')\n    or (type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration))\n    or (type =~ 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint))\n    or (type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets))\n    or (type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d))\n    or (type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0)\n    or (type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| join kind=leftouter (resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId, SubName = name) on subscriptionId\n| summarize ['Stale resources'] = count(), ['Est. monthly cost'] = round(sum(['Est. monthly cost']), 2) by Subscription = coalesce(SubName, subscriptionId)\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "Estimated monthly waste by subscription ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "piechart",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "overview-sub"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Reason = case(\n    type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached', 'Unattached managed disk',\n    type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway), 'Unassociated public IP',\n    type =~ 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint), 'Unattached NIC',\n    type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets), 'NSG not associated',\n    type =~ 'microsoft.network/routetables' and isnull(properties.subnets), 'Route table not associated',\n    type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d), 'Snapshot older than {StaleDays} days',\n    type =~ 'microsoft.compute/availabilitysets' and array_length(properties.virtualMachines) == 0, 'Empty availability set',\n    type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0, 'App Service plan with no apps',\n    type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0, 'Load balancer with no backend pool',\n    type =~ 'microsoft.network/applicationgateways' and array_length(properties.backendAddressPools) == 0, 'Application gateway with no backend pool',\n    type =~ 'microsoft.compute/virtualmachines' and tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/stopped', 'VM stopped but not deallocated',\n    '')\n| where isnotempty(Reason)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| project Name = name, Reason, Type = type, ['Resource group'] = resourceGroup, Location = location, ['Open resource'] = id, Tags = tags, ['Est. monthly cost']\n| order by ['Est. monthly cost'] desc, Reason asc\n",
+              "size": 0,
+              "title": "All flagged resources",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "overview-all"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      },
+      "name": "group-overview"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Cost\n\n**Estimated cost** columns across the workbook use the editable unit prices at the top \u2014 good enough for prioritising clean-up, not for billing.\n\n**Actual cost** below calls Azure Cost Management live. It needs *Cost Management Reader* (or Billing Reader) on the selected subscription, and works one subscription at a time."
+            },
+            "name": "cost-text"
+          },
+          {
+            "type": 9,
+            "content": {
+              "version": "KqlParameterItem/1.0",
+              "parameters": [
+                {
+                  "id": "a48f2a4c-60ea-4697-ae71-751ad6605918",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "CostSubscription",
+                  "label": "Subscription for actual cost",
+                  "type": 6,
+                  "isRequired": true,
+                  "multiSelect": false,
+                  "quote": "'",
+                  "delimiter": ",",
+                  "typeSettings": {
+                    "additionalResourceOptions": [],
+                    "showDefault": false
+                  }
+                },
+                {
+                  "id": "dbc12a89-856b-49ca-9f5c-bb5e96ae4e21",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "CostTimeframe",
+                  "label": "Timeframe",
+                  "type": 2,
+                  "isRequired": true,
+                  "jsonData": "[\"MonthToDate\",\"BillingMonthToDate\",\"TheLastMonth\",\"TheLastBillingMonth\"]",
+                  "value": "MonthToDate",
+                  "typeSettings": {
+                    "additionalResourceOptions": [],
+                    "showDefault": false
+                  }
+                }
+              ],
+              "style": "pills",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources"
+            },
+            "name": "cost-params"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Reason = case(\n    type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached', 'Unattached managed disk',\n    type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway), 'Unassociated public IP',\n    type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d), 'Old snapshot',\n    type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0, 'Empty App Service plan',\n    type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0, 'Load balancer without backend',\n    type =~ 'microsoft.network/applicationgateways' and array_length(properties.backendAddressPools) == 0, 'App gateway without backend',\n    type =~ 'microsoft.compute/virtualmachines' and tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/stopped', 'VM stopped but not deallocated',\n    '')\n| where isnotempty(Reason)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| project Name = name, Reason, Type = type, ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost'], ['Est. annual cost'] = round(['Est. monthly cost'] * 12, 2), ['Open resource'] = id\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "Estimated monthly & annual savings by resource ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. annual cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "cost-estimate-table"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\": \"ARMEndpoint/1.0\", \"method\": \"POST\", \"path\": \"/subscriptions/{CostSubscription:subscriptionId}/providers/Microsoft.CostManagement/query\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2023-03-01\"}], \"headers\": [{\"name\": \"Content-Type\", \"value\": \"application/json\"}], \"body\": \"{\\\"type\\\": \\\"ActualCost\\\", \\\"timeframe\\\": \\\"{CostTimeframe}\\\", \\\"dataset\\\": {\\\"granularity\\\": \\\"None\\\", \\\"aggregation\\\": {\\\"totalCost\\\": {\\\"name\\\": \\\"Cost\\\", \\\"function\\\": \\\"Sum\\\"}}, \\\"grouping\\\": [{\\\"type\\\": \\\"Dimension\\\", \\\"name\\\": \\\"ResourceId\\\"}, {\\\"type\\\": \\\"Dimension\\\", \\\"name\\\": \\\"ResourceType\\\"}]}}\", \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.properties.rows\", \"columns\": [{\"path\": \"$.[0]\", \"columnid\": \"Cost\", \"columnType\": \"real\"}, {\"path\": \"$.[1]\", \"columnid\": \"ResourceId\"}, {\"path\": \"$.[2]\", \"columnid\": \"ResourceType\"}, {\"path\": \"$.[3]\", \"columnid\": \"Currency\"}]}}]}",
+              "size": 0,
+              "title": "Actual cost by resource \u2014 {CostTimeframe} (Cost Management)",
+              "queryType": 12,
+              "visualization": "table",
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Cost",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "showExportToExcel": true
+            },
+            "name": "cost-actual"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "cost"
+      },
+      "name": "group-cost"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Compute\nVMs left in a **Stopped** (not deallocated) state still incur compute charges. Deallocate or delete them."
+            },
+            "name": "compute-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/virtualmachines'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend PowerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| where PowerState !has 'deallocated' and PowerState !has 'running'\n| extend ['Est. monthly cost'] = round(todouble('{PriceVMHour}') * 730.0, 2)\n| project Name = name, VM = id, PowerState, Size = tostring(properties.hardwareProfile.vmSize), ['Resource group'] = resourceGroup, Location = location, Tags = tags, ['Est. monthly cost']\n| order by ['Resource group'] asc\n",
+              "size": 0,
+              "title": "VMs stopped but not deallocated",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "VM",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "compute-stopped"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/virtualmachines'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend PowerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| where PowerState has 'deallocated'\n| project Name = name, VM = id, PowerState, Size = tostring(properties.hardwareProfile.vmSize), ['Resource group'] = resourceGroup, Location = location\n| order by VM asc\n",
+              "size": 0,
+              "title": "Deallocated VMs (idle capacity \u2014 disks still billed)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "VM",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "compute-dealloc"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/availabilitysets'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where array_length(properties.virtualMachines) == 0\n| project Name = name, ['Availability set'] = id, ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "Empty availability sets",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Availability set",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "compute-avset"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/virtualmachinescalesets'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Capacity = toint(sku.capacity)\n| where Capacity == 0\n| project Name = name, ['Scale set'] = id, Capacity, SKU = tostring(sku.name), ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "Virtual machine scale sets with zero instances",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Scale set",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "compute-vmss"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "compute"
+      },
+      "name": "group-compute"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Storage & disks\nUnattached disks and ageing snapshots/images are the most common source of silent spend."
+            },
+            "name": "storage-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/disks'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where tostring(properties.diskState) =~ 'Unattached'\n| extend SizeGB = toint(properties.diskSizeGB), SKU = tostring(sku.name), Created = todatetime(properties.timeCreated)\n| extend ['Age (days)'] = toint(datetime_diff('day', now(), Created))\n| extend ['Est. monthly cost'] = round(toreal(SizeGB) * case(SKU has 'Ultra', todouble('{PriceDiskUltra}'), SKU has 'Premium', todouble('{PriceDiskPremium}'), SKU has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')), 2)\n| project Name = name, Disk = id, SizeGB, SKU, Created, ['Age (days)'], ['Resource group'] = resourceGroup, Location = location, Tags = tags, ['Est. monthly cost']\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "Unattached managed disks",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Disk",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "SizeGB",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "blue"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "storage-disks"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/disks'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where tostring(properties.diskState) =~ 'Unattached'\n| summarize ['Total GB'] = sum(toint(properties.diskSizeGB)), Disks = count() by SKU = tostring(sku.name)\n| order by ['Total GB'] desc\n",
+              "size": 0,
+              "title": "Unattached disk capacity by SKU",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [],
+                "filter": true
+              }
+            },
+            "name": "storage-disks-sku"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/snapshots'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Created = todatetime(properties.timeCreated)\n| where Created < ago({StaleDays}d)\n| extend ['Age (days)'] = toint(datetime_diff('day', now(), Created)), SizeGB = toint(properties.diskSizeGB)\n| extend ['Est. monthly cost'] = round(toreal(SizeGB) * todouble('{PriceSnapshot}'), 2)\n| project Name = name, Snapshot = id, Created, ['Age (days)'], SizeGB, ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost']\n| order by ['Age (days)'] desc\n",
+              "size": 0,
+              "title": "Snapshots older than {StaleDays} days",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Snapshot",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "storage-snapshots"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.compute/images' or type =~ 'microsoft.compute/galleries/images/versions'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Created = todatetime(properties.publishingProfile.publishedDate)\n| project Name = name, Image = id, Type = type, Created, ['Resource group'] = resourceGroup, Location = location\n| order by Image asc\n",
+              "size": 0,
+              "title": "Custom images older than {StaleDays} days",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Image",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "storage-images"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.storage/storageaccounts'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend PublicBlob = tostring(properties.allowBlobPublicAccess), MinTls = tostring(properties.minimumTlsVersion), Created = todatetime(properties.creationTime)\n| extend ['Age (days)'] = toint(datetime_diff('day', now(), Created))\n| project Name = name, ['Storage account'] = id, PublicBlob, MinTls, Created, ['Age (days)'], ['Resource group'] = resourceGroup, Location = location\n| order by ['Age (days)'] desc\n",
+              "size": 0,
+              "title": "Storage accounts allowing public blob access / legacy TLS (review candidates)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Storage account",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "storage-accounts"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "storage"
+      },
+      "name": "group-storage"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Networking\nOrphaned IPs, NICs, NSGs, gateways and empty subnets."
+            },
+            "name": "net-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/publicipaddresses'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where isnull(properties.ipConfiguration) and isnull(properties.natGateway)\n| extend ['Est. monthly cost'] = iff(tostring(sku.name) =~ 'Basic', todouble('{PricePublicIP}'), todouble('{PricePublicIP}'))\n| project Name = name, ['Public IP'] = id, SKU = tostring(sku.name), Tier = tostring(sku.tier), Allocation = tostring(properties.publicIPAllocationMethod), Address = tostring(properties.ipAddress), ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost']\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "Unassociated public IP addresses",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Public IP",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-pip"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/networkinterfaces'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where isnull(properties.virtualMachine) and isnull(properties.privateEndpoint)\n| project Name = name, NIC = id, ['Resource group'] = resourceGroup, Location = location, Tags = tags\n",
+              "size": 0,
+              "title": "Unattached network interfaces",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "NIC",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-nic"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/networksecuritygroups'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where isnull(properties.networkInterfaces) and isnull(properties.subnets)\n| project Name = name, NSG = id, Rules = array_length(properties.securityRules), ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "Network security groups with no association",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "NSG",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-nsg"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/routetables'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where isnull(properties.subnets) or array_length(properties.subnets) == 0\n| project Name = name, ['Route table'] = id, Routes = array_length(properties.routes), ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "Route tables with no subnet association",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Route table",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-rt"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type in~ ('microsoft.network/loadbalancers','microsoft.network/applicationgateways')\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where array_length(properties.backendAddressPools) == 0\n| extend ['Est. monthly cost'] = iff(type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'), todouble('{PriceLB}'))\n| project Name = name, Resource = id, Type = type, SKU = tostring(sku.name), ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost']\n",
+              "size": 0,
+              "title": "Load balancers and application gateways with no backend targets",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-lb"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/virtualnetworks'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| mv-expand subnet = properties.subnets\n| summarize Subnets = count(), UsedSubnets = countif(array_length(subnet.properties.ipConfigurations) > 0) by Name = name, ['Resource group'] = resourceGroup, Location = location, ['Open resource'] = id\n| where UsedSubnets == 0\n| project Name, Subnets, ['Resource group'], Location, ['Open resource']\n| order by Name asc\n",
+              "size": 0,
+              "title": "Empty virtual networks (no subnets in use)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-vnet"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.network/privateendpoints'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| mv-expand conn = properties.privateLinkServiceConnections\n| extend Status = tostring(conn.properties.privateLinkServiceConnectionState.status)\n| where Status !~ 'Approved'\n| project Name = name, Status, ['Resource group'] = resourceGroup, Location = location, ['Open resource'] = id\n| order by Name asc\n",
+              "size": 0,
+              "title": "Private endpoints in a disconnected / rejected state",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "net-pe"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "network"
+      },
+      "name": "group-network"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## App & data services\nEmpty plans, stopped web apps and unused data services."
+            },
+            "name": "app-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.web/serverfarms'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| where toint(properties.numberOfSites) == 0\n| extend ['Est. monthly cost'] = round(todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0), 2)\n| project Name = name, Plan = id, SKU = tostring(sku.name), Tier = tostring(sku.tier), Workers = toint(sku.capacity), ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost']\n| order by ['Est. monthly cost'] desc\n",
+              "size": 0,
+              "title": "App Service plans with no apps",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Plan",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "app-plans"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.web/sites'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend State = tostring(properties.state)\n| where State !~ 'Running'\n| project Name = name, App = id, State, Kind = kind, ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "Web apps / function apps that are stopped",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "App",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "app-sites"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type =~ 'microsoft.containerservice/managedclusters'\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Power = tostring(properties.powerState.code)\n| where Power !~ 'Running'\n| project Name = name, Cluster = id, Power, ['Resource group'] = resourceGroup, Location = location\n",
+              "size": 0,
+              "title": "AKS clusters that are stopped",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Cluster",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "app-aks"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where type in~ ('microsoft.keyvault/vaults','microsoft.operationalinsights/workspaces','microsoft.appconfiguration/configurationstores')\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| project Name = name, Resource = id, Type = type, ['Resource group'] = resourceGroup, Location = location, SKU = tostring(sku.name)\n| order by Type asc\n",
+              "size": 0,
+              "title": "Key vaults, log analytics workspaces and app configs created over {StaleDays} days ago (review usage)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "app-misc"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "appdata"
+      },
+      "name": "group-appdata"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Resources with no configuration change\nUses the Resource Graph **change history** (retained for 14 days for `resourcechanges`; the query below flags resources whose last recorded change is older than the window, i.e. untouched). Combine with cost and activity-log data before acting."
+            },
+            "name": "nochange-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| project id, name, type, resourceGroup, location, subscriptionId, tags\n| join kind=leftouter (\n    resourcechanges\n    | extend changeTime = todatetime(properties.changeAttributes.timestamp), targetId = tolower(tostring(properties.targetResourceId))\n    | summarize LastChange = max(changeTime) by id = targetId\n) on $left.id == $right.id\n| where isnull(LastChange)\n| project Name = name, Type = type, ['Resource group'] = resourceGroup, Location = location, ['Last change'] = 'No change in retention window', ['Open resource'] = id, Tags = tags\n| order by Type asc, Name asc\n",
+              "size": 0,
+              "title": "Resources with no change recorded in the last 14 days",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "id",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "nochange-list"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresourcechanges\n| extend changeTime = todatetime(properties.changeAttributes.timestamp),\n         targetId = tostring(properties.targetResourceId),\n         changeType = tostring(properties.changeType),\n         changedBy = tostring(properties.changeAttributes.changedBy)\n| where changeTime > ago(14d)\n| extend Name = tostring(split(targetId, '/')[-1]), ['Resource group'] = tostring(split(targetId, '/')[4])\n| project changeTime, Name, ['Resource group'], ['Change type'] = changeType, ['Changed by'] = changedBy, ['Open resource'] = targetId\n| order by changeTime desc\n| take 200\n",
+              "size": 0,
+              "title": "Recent changes (last 14 days) \u2014 what is actually active",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "nochange-recent"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isnull(tags) or array_length(bag_keys(tags)) == 0\n| summarize Resources = count() by Type = type\n| order by Resources desc\n| take 25\n",
+              "size": 0,
+              "title": "Resources with no tags (ownership unknown)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [],
+                "filter": true
+              }
+            },
+            "name": "nochange-notags"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "nochange"
+      },
+      "name": "group-nochange"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Empty resource groups & orphan clean-up list"
+            },
+            "name": "empty-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresourcecontainers\n| where type =~ 'microsoft.resources/subscriptions/resourcegroups'\n| extend rgKey = tolower(id)\n| join kind=leftouter (\n    resources\n    | extend rgKey = tolower(strcat('/subscriptions/', subscriptionId, '/resourcegroups/', resourceGroup))\n    | summarize Resources = count() by rgKey\n) on rgKey\n| extend Resources = coalesce(Resources, 0)\n| where Resources == 0\n| project Name = name, Location = location, Resources, ['Open resource'] = id, Tags = tags\n| order by Name asc\n",
+              "size": 0,
+              "title": "Empty resource groups",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "empty-rg"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "\nresources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| where isempty('{TagName}') or isnull(tags) or not(bag_keys(tags) has '{TagName}')\n| extend Reason = case(\n    type =~ 'microsoft.compute/disks' and tostring(properties.diskState) =~ 'Unattached', 'Unattached managed disk',\n    type =~ 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway), 'Unassociated public IP',\n    type =~ 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint), 'Unattached NIC',\n    type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets), 'NSG not associated',\n    type =~ 'microsoft.network/routetables' and isnull(properties.subnets), 'Route table not associated',\n    type =~ 'microsoft.compute/snapshots' and todatetime(properties.timeCreated) < ago({StaleDays}d), 'Old snapshot',\n    type =~ 'microsoft.compute/availabilitysets' and array_length(properties.virtualMachines) == 0, 'Empty availability set',\n    type =~ 'microsoft.web/serverfarms' and toint(properties.numberOfSites) == 0, 'Empty App Service plan',\n    type =~ 'microsoft.network/loadbalancers' and array_length(properties.backendAddressPools) == 0, 'Load balancer without backend',\n    '')\n| where isnotempty(Reason)\n| extend Owner = tostring(tags['Owner']), CostCenter = tostring(tags['CostCenter'])\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    0.0), 2)\n| project Name = name, Reason, Type = type, ['Resource group'] = resourceGroup, Location = location, Owner, CostCenter, ResourceId = id, ['Est. monthly cost']\n| order by ['Est. monthly cost'] desc, Reason asc\n",
+              "size": 0,
+              "title": "Clean-up worklist (all orphans, export to Excel)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "exportToExcelOptions": "visible",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "filter": true
+              }
+            },
+            "name": "empty-worklist"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "empty"
+      },
+      "name": "group-empty"
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [
+    "Azure Monitor"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

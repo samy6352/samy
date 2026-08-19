@@ -1,0 +1,956 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# \ud83d\udcc5 Resource Creation & Cost Run-Rate\nMonth-by-month view of what was created in Azure, when, what it costs, and how much recurring spend each month added.\n\n| Column | Meaning |\n|---|---|\n| **Monthly cost added** | New recurring monthly charge introduced by resources created that month |\n| **Cumulative run-rate** | Total estimated monthly bill carried by everything created up to that month |\n| **Est. cost since creation** | Run-rate \u00d7 age, i.e. rough spend to date |"
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": [
+          "value::selected"
+        ],
+        "parameters": [
+          {
+            "id": "c8fa2d2b-a715-4049-aa42-33b3caea53fb",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "5fa35072-eea3-4697-b831-4b0e1f5f002a",
+            "version": "KqlParameterItem/1.0",
+            "name": "ResourceGroups",
+            "label": "Resource groups",
+            "type": 2,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "isRequired": true,
+            "query": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' | project value = tolower(name), label = name | order by label asc",
+            "crossComponentResources": [
+              "{Subscriptions}"
+            ],
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "803e03c7-68eb-444c-a6c1-0e0b3c9ef2f4",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Creation window",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 7776000000
+                },
+                {
+                  "durationMs": 15552000000
+                },
+                {
+                  "durationMs": 31536000000
+                },
+                {
+                  "durationMs": 63072000000
+                },
+                {
+                  "durationMs": 157680000000
+                }
+              ],
+              "allowCustom": true
+            },
+            "value": {
+              "durationMs": 31536000000
+            }
+          },
+          {
+            "id": "c36e2b5e-614d-4599-a6bd-2c31d88808e6",
+            "version": "KqlParameterItem/1.0",
+            "name": "ArmSubscription",
+            "label": "Subscription (for ARM / Cost Management views)",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": false,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "\ud83d\udcb0 **Estimated unit prices** \u2014 approximate US East list prices. Adjust for your region, currency and discounts; every cost column recalculates. Set *Any other resource type* above 0 to give uncosted types a nominal value."
+      },
+      "name": "price-note"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "27a353a1-457f-4f25-ae1e-f3f68b272f98",
+            "version": "KqlParameterItem/1.0",
+            "name": "Currency",
+            "label": "Currency",
+            "type": 2,
+            "isRequired": true,
+            "jsonData": "[\"USD\",\"INR\",\"EUR\",\"GBP\",\"AUD\"]",
+            "value": "USD",
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            }
+          },
+          {
+            "id": "4723ae3c-6c15-43ac-ae8f-9244a47c3ff3",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskPremium",
+            "label": "Premium SSD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.135"
+          },
+          {
+            "id": "7794ccfe-d7ca-4fa4-b33f-a2023e9f147a",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskSSD",
+            "label": "Standard SSD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.075"
+          },
+          {
+            "id": "455504fa-664f-40a4-af8e-183cb7c961f5",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskHDD",
+            "label": "Standard HDD /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.045"
+          },
+          {
+            "id": "7bfdd900-5b5f-4219-988a-8af01f4c7c37",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDiskUltra",
+            "label": "Ultra disk /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.20"
+          },
+          {
+            "id": "8438ce31-22fa-46c0-9c34-c013aa3446e5",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceSnapshot",
+            "label": "Snapshot /GB-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.05"
+          },
+          {
+            "id": "df64fda8-b48b-4d41-b3c0-7c2913b60b31",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceVMHour",
+            "label": "VM /hour (avg)",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.10"
+          },
+          {
+            "id": "8aa30744-2d8e-42aa-ba7e-047c57055d22",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePublicIP",
+            "label": "Public IP /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "3.65"
+          },
+          {
+            "id": "cf0d94c5-ad49-41a8-a8a1-8eabb6fb4bce",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceLB",
+            "label": "Load balancer /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "18.25"
+          },
+          {
+            "id": "b58441d7-f6f9-448a-a353-7b82dbc3a72a",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceAppGw",
+            "label": "App gateway /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "180"
+          },
+          {
+            "id": "5e2ef389-a882-4c4d-a7f5-2b66e6217f57",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceFirewall",
+            "label": "Azure Firewall /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "912"
+          },
+          {
+            "id": "8b33617a-d30c-424b-9d3b-13b63afe016e",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceVpnGw",
+            "label": "VPN/ER gateway /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "138"
+          },
+          {
+            "id": "9d344929-e3ef-4388-8b3d-2bd4ffa2d63b",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceSqlDb",
+            "label": "SQL database /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "150"
+          },
+          {
+            "id": "f5d537e9-a337-4f2f-800d-74c4b5eb2a89",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceDbServer",
+            "label": "MySQL/PG flexible server /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "120"
+          },
+          {
+            "id": "3bf22b04-7a76-42f7-aa7e-0f48a864f15b",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceAks",
+            "label": "AKS cluster (control plane) /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "73"
+          },
+          {
+            "id": "079b6cb1-a023-4ee8-bd2f-da211d50bbe0",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceStorageAcct",
+            "label": "Storage account /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "25"
+          },
+          {
+            "id": "deda638f-04aa-46cd-a30a-e271ccdbeaad",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanBasic",
+            "label": "App plan Basic /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "55"
+          },
+          {
+            "id": "5f7a23b5-6503-4467-a66e-2a66db73c4ec",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanStandard",
+            "label": "App plan Standard /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "75"
+          },
+          {
+            "id": "4e53fc3d-4fce-46d3-b9ab-3e3c81bd879b",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanPremium",
+            "label": "App plan Premium /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "150"
+          },
+          {
+            "id": "57a0a756-85de-4905-abe9-741dfefd81b7",
+            "version": "KqlParameterItem/1.0",
+            "name": "PricePlanIsolated",
+            "label": "App plan Isolated /worker-mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "700"
+          },
+          {
+            "id": "a5ab04ff-dcd8-43a0-97ca-094af68976f8",
+            "version": "KqlParameterItem/1.0",
+            "name": "PriceOther",
+            "label": "Any other resource type /mo",
+            "type": 1,
+            "isRequired": true,
+            "value": "0"
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "price-parameters"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "a0c5ab98-103a-4f6f-b119-6248c85a1782",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Monthly summary",
+            "subTarget": "summary",
+            "style": "link"
+          },
+          {
+            "id": "9cfb81a0-9a15-4c6d-9eba-99eb40b848e2",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Cost run-rate",
+            "subTarget": "runrate",
+            "style": "link"
+          },
+          {
+            "id": "c819167d-b1f8-4951-b44d-26a092674637",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Resource detail",
+            "subTarget": "detail",
+            "style": "link"
+          },
+          {
+            "id": "bbb77e50-34c6-4feb-81f3-be53ceb9f790",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "All creation dates (ARM)",
+            "subTarget": "arm",
+            "style": "link"
+          },
+          {
+            "id": "093648bd-19dd-406d-a6f5-195f75139e0d",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Actual monthly cost",
+            "subTarget": "actual",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Resources created per month\nCreation dates come from each resource's own `timeCreated` / `creationTime` property in Azure Resource Graph. Types that don't expose a creation property are excluded here \u2014 use the **All creation dates (ARM)** tab for full coverage.\n\n`Monthly cost added` = the estimated *recurring* monthly charge introduced by everything created in that month."
+            },
+            "name": "sum-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize ['Resources created'] = count(),\n            ['Run-rate added (monthly)'] = round(sum(['Est. monthly cost']), 2),\n            ['Annualised'] = round(sum(['Est. monthly cost']) * 12, 2),\n            ['First created'] = min(Created),\n            ['Latest created'] = max(Created)",
+              "size": 4,
+              "title": "Headline ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "tiles",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": []
+              },
+              "tileSettings": {
+                "showBorder": true,
+                "titleContent": {
+                  "columnMatch": "Resources created",
+                  "formatter": 12
+                },
+                "leftContent": {
+                  "columnMatch": "Run-rate added (monthly)",
+                  "formatter": 12,
+                  "numberFormat": {
+                    "unit": 0,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 0
+                    }
+                  }
+                }
+              }
+            },
+            "name": "sum-tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize ['Resources created'] = count(), ['Monthly cost added'] = round(sum(['Est. monthly cost']), 2) by Month = format_datetime(startofmonth(Created), 'yyyy-MM')\n| order by Month asc",
+              "size": 0,
+              "title": "Resources created per month",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": []
+              }
+            },
+            "name": "sum-count"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize ['Resources created'] = count(), ['Monthly cost added'] = round(sum(['Est. monthly cost']), 2) by Month = format_datetime(startofmonth(Created), 'yyyy-MM')\n| order by Month asc",
+              "size": 0,
+              "title": "Monthly cost added by creation month ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": []
+              },
+              "chartSettings": {
+                "xAxis": "Month",
+                "yAxis": [
+                  "Monthly cost added"
+                ],
+                "seriesLabelSettings": []
+              }
+            },
+            "name": "sum-cost"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize ['Resources created'] = count(), ['Monthly cost added'] = round(sum(['Est. monthly cost']), 2) by Month = format_datetime(startofmonth(Created), 'yyyy-MM'), Type = type\n| order by Month asc, ['Monthly cost added'] desc",
+              "size": 0,
+              "title": "Creation month \u00d7 resource type",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Monthly cost added",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ],
+                "hierarchySettings": {
+                  "treeType": 1,
+                  "groupBy": [
+                    "Month"
+                  ]
+                }
+              }
+            },
+            "name": "sum-type"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "summary"
+      },
+      "name": "group-summary"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Cost run-rate over time\n`Monthly cost added` is the new recurring spend introduced that month. `Cumulative run-rate` is the total estimated monthly bill carried by everything created up to and including that month \u2014 i.e. how spend compounds after each resource is created."
+            },
+            "name": "rr-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize CostA = round(sum(['Est. monthly cost']), 2), CountA = count() by MonthA = startofmonth(Created)\n| extend k = 1\n| join kind=inner (resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize CostB = sum(['Est. monthly cost']), CountB = count() by MonthB = startofmonth(Created)\n| extend k = 1) on k\n| where MonthB <= MonthA\n| summarize ['Monthly cost added'] = round(any(CostA), 2),\n            ['Resources created'] = any(CountA),\n            ['Cumulative run-rate'] = round(sum(CostB), 2),\n            ['Cumulative resources'] = sum(CountB)\n        by Month = format_datetime(MonthA, 'yyyy-MM')\n| order by Month asc",
+              "size": 0,
+              "title": "Cumulative monthly run-rate ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "linechart",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": []
+              },
+              "chartSettings": {
+                "xAxis": "Month",
+                "yAxis": [
+                  "Cumulative run-rate",
+                  "Monthly cost added"
+                ],
+                "seriesLabelSettings": []
+              }
+            },
+            "name": "rr-chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize CostA = round(sum(['Est. monthly cost']), 2), CountA = count() by MonthA = startofmonth(Created)\n| extend k = 1\n| join kind=inner (resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize CostB = sum(['Est. monthly cost']), CountB = count() by MonthB = startofmonth(Created)\n| extend k = 1) on k\n| where MonthB <= MonthA\n| summarize ['Monthly cost added'] = round(any(CostA), 2),\n            ['Resources created'] = any(CountA),\n            ['Cumulative run-rate'] = round(sum(CostB), 2),\n            ['Cumulative resources'] = sum(CountB)\n        by Month = format_datetime(MonthA, 'yyyy-MM')\n| order by Month asc",
+              "size": 0,
+              "title": "Run-rate table ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Monthly cost added",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Cumulative run-rate",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "rr-table"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| project Name = name, Created, Month = format_datetime(startofmonth(Created), 'yyyy-MM'), Type = type, ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost'], ['Est. annual cost'] = round(['Est. monthly cost'] * 12, 2), ['Open resource'] = id\n| order by ['Est. monthly cost'] desc\n| take 50",
+              "size": 0,
+              "title": "Biggest cost additions \u2014 top 50 resources by recurring cost ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. annual cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "rr-top"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "runrate"
+      },
+      "name": "group-runrate"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Every resource with its creation date and estimated cost\nFilter the grid or export to Excel. `Age (days)` and `Cost since creation` show how much a resource has accumulated at its estimated run-rate."
+            },
+            "name": "det-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| extend ['Age (days)'] = toint(datetime_diff('day', now(), Created))\n| extend ['Est. cost since creation'] = round(['Est. monthly cost'] * (toreal(['Age (days)']) / 30.4), 2)\n| extend Owner = tostring(tags['Owner']), CostCenter = tostring(tags['CostCenter'])\n| project Name = name, Created, Month = format_datetime(startofmonth(Created), 'yyyy-MM'), ['Age (days)'], Type = type, ['Resource group'] = resourceGroup, Location = location, ['Est. monthly cost'], ['Est. cost since creation'], Owner, CostCenter, ['Open resource'] = id\n| order by Created desc",
+              "size": 0,
+              "title": "Resources by creation date ({Currency})",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Created",
+                    "formatter": 6
+                  },
+                  {
+                    "columnMatch": "Est. monthly cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Est. cost since creation",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "det-table"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where '{ResourceGroups:label}' == 'All' or resourceGroup in~ ({ResourceGroups})\n| extend Created = coalesce(\n    todatetime(properties.timeCreated),\n    todatetime(properties.creationTime),\n    todatetime(properties.createdTime),\n    todatetime(properties.createdOn),\n    todatetime(properties.creationDate),\n    todatetime(properties.dateCreated),\n    todatetime(properties.provisioningTime))\n| where isnotnull(Created)\n| extend ['Est. monthly cost'] = round(case(\n    type =~ 'microsoft.compute/disks', toreal(properties.diskSizeGB) * case(tostring(sku.name) has 'Ultra', todouble('{PriceDiskUltra}'), tostring(sku.name) has 'Premium', todouble('{PriceDiskPremium}'), tostring(sku.name) has 'StandardSSD', todouble('{PriceDiskSSD}'), todouble('{PriceDiskHDD}')),\n    type =~ 'microsoft.compute/snapshots', toreal(properties.diskSizeGB) * todouble('{PriceSnapshot}'),\n    type =~ 'microsoft.compute/virtualmachines', todouble('{PriceVMHour}') * 730.0,\n    type =~ 'microsoft.network/publicipaddresses', todouble('{PricePublicIP}'),\n    type =~ 'microsoft.network/loadbalancers', todouble('{PriceLB}'),\n    type =~ 'microsoft.network/applicationgateways', todouble('{PriceAppGw}'),\n    type =~ 'microsoft.network/azurefirewalls', todouble('{PriceFirewall}'),\n    type =~ 'microsoft.network/virtualnetworkgateways', todouble('{PriceVpnGw}'),\n    type =~ 'microsoft.sql/servers/databases', todouble('{PriceSqlDb}'),\n    type =~ 'microsoft.dbforpostgresql/flexibleservers' or type =~ 'microsoft.dbformysql/flexibleservers', todouble('{PriceDbServer}'),\n    type =~ 'microsoft.containerservice/managedclusters', todouble('{PriceAks}'),\n    type =~ 'microsoft.storage/storageaccounts', todouble('{PriceStorageAcct}'),\n    type =~ 'microsoft.web/serverfarms', todouble(coalesce(toint(sku.capacity),1)) * case(tostring(sku.tier) has 'Isolated', todouble('{PricePlanIsolated}'), tostring(sku.tier) has 'Premium', todouble('{PricePlanPremium}'), tostring(sku.tier) has 'Standard', todouble('{PricePlanStandard}'), tostring(sku.tier) has 'Basic', todouble('{PricePlanBasic}'), 0.0),\n    todouble('{PriceOther}')), 2)\n| where Created >= datetime({TimeRange:startISO}) and Created <= datetime({TimeRange:endISO})\n| summarize ['Resources created'] = count(), ['Monthly cost added'] = round(sum(['Est. monthly cost']), 2) by ['Resource group'] = resourceGroup\n| order by ['Monthly cost added'] desc\n| take 30",
+              "size": 0,
+              "title": "Creation activity by resource group",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": []
+              }
+            },
+            "name": "det-rg"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "detail"
+      },
+      "name": "group-detail"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Authoritative creation dates for every resource\nThis calls Azure Resource Manager directly with `$expand=createdTime,changedTime`, so it returns a creation date for **all** resource types \u2014 including the ones that don't publish a creation property to Resource Graph. It runs one subscription at a time."
+            },
+            "name": "arm-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\": \"ARMEndpoint/1.0\", \"method\": \"GET\", \"path\": \"/subscriptions/{ArmSubscription:subscriptionId}/resources\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2021-04-01\"}, {\"key\": \"$expand\", \"value\": \"createdTime,changedTime\"}], \"headers\": [], \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.value\", \"columns\": [{\"path\": \"$.name\", \"columnid\": \"Name\"}, {\"path\": \"$.type\", \"columnid\": \"Type\"}, {\"path\": \"$.location\", \"columnid\": \"Location\"}, {\"path\": \"$.createdTime\", \"columnid\": \"Created\", \"columnType\": \"datetime\"}, {\"path\": \"$.changedTime\", \"columnid\": \"Last changed\", \"columnType\": \"datetime\"}, {\"path\": \"$.id\", \"columnid\": \"Open resource\"}]}}]}",
+              "size": 0,
+              "title": "All resources with ARM creation & last-changed dates",
+              "queryType": 12,
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Name",
+                    "formatter": 1
+                  },
+                  {
+                    "columnMatch": "Created",
+                    "formatter": 6
+                  },
+                  {
+                    "columnMatch": "Last changed",
+                    "formatter": 6
+                  },
+                  {
+                    "columnMatch": "Open resource",
+                    "formatter": 15,
+                    "formatOptions": {
+                      "linkTarget": "Resource",
+                      "showIcon": true,
+                      "linkLabel": "Open in portal"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Created",
+                    "sortOrder": 2
+                  }
+                ]
+              }
+            },
+            "name": "arm-table"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "arm"
+      },
+      "name": "group-arm"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Actual billed cost per month\nPulled live from Azure Cost Management for the selected subscription and creation window. Compare this against the estimated run-rate on the **Cost run-rate** tab to calibrate your unit prices.\n\nRequires *Cost Management Reader* or *Billing Reader*."
+            },
+            "name": "act-text"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\": \"ARMEndpoint/1.0\", \"method\": \"POST\", \"path\": \"/subscriptions/{ArmSubscription:subscriptionId}/providers/Microsoft.CostManagement/query\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2023-03-01\"}], \"headers\": [{\"name\": \"Content-Type\", \"value\": \"application/json\"}], \"body\": \"{\\\"type\\\": \\\"ActualCost\\\", \\\"timeframe\\\": \\\"Custom\\\", \\\"timePeriod\\\": {\\\"from\\\": \\\"{TimeRange:startISO}\\\", \\\"to\\\": \\\"{TimeRange:endISO}\\\"}, \\\"dataset\\\": {\\\"granularity\\\": \\\"Monthly\\\", \\\"aggregation\\\": {\\\"totalCost\\\": {\\\"name\\\": \\\"Cost\\\", \\\"function\\\": \\\"Sum\\\"}}, \\\"grouping\\\": [{\\\"type\\\": \\\"Dimension\\\", \\\"name\\\": \\\"ResourceType\\\"}]}}\", \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.properties.rows\", \"columns\": [{\"path\": \"$.[0]\", \"columnid\": \"Cost\", \"columnType\": \"real\"}, {\"path\": \"$.[1]\", \"columnid\": \"Month\"}, {\"path\": \"$.[2]\", \"columnid\": \"ResourceType\"}, {\"path\": \"$.[3]\", \"columnid\": \"Currency\"}]}}]}",
+              "size": 0,
+              "title": "Actual monthly cost by resource type",
+              "queryType": 12,
+              "visualization": "barchart",
+              "showExportToExcel": true,
+              "chartSettings": {
+                "xAxis": "Month",
+                "yAxis": [
+                  "Cost"
+                ],
+                "group": "ResourceType",
+                "seriesLabelSettings": []
+              }
+            },
+            "name": "act-chart"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\": \"ARMEndpoint/1.0\", \"method\": \"POST\", \"path\": \"/subscriptions/{ArmSubscription:subscriptionId}/providers/Microsoft.CostManagement/query\", \"urlParams\": [{\"key\": \"api-version\", \"value\": \"2023-03-01\"}], \"headers\": [{\"name\": \"Content-Type\", \"value\": \"application/json\"}], \"body\": \"{\\\"type\\\": \\\"ActualCost\\\", \\\"timeframe\\\": \\\"Custom\\\", \\\"timePeriod\\\": {\\\"from\\\": \\\"{TimeRange:startISO}\\\", \\\"to\\\": \\\"{TimeRange:endISO}\\\"}, \\\"dataset\\\": {\\\"granularity\\\": \\\"Monthly\\\", \\\"aggregation\\\": {\\\"totalCost\\\": {\\\"name\\\": \\\"Cost\\\", \\\"function\\\": \\\"Sum\\\"}}, \\\"grouping\\\": [{\\\"type\\\": \\\"Dimension\\\", \\\"name\\\": \\\"ResourceType\\\"}]}}\", \"transformers\": [{\"type\": \"jsonpath\", \"settings\": {\"tablePath\": \"$.properties.rows\", \"columns\": [{\"path\": \"$.[0]\", \"columnid\": \"Cost\", \"columnType\": \"real\"}, {\"path\": \"$.[1]\", \"columnid\": \"Month\"}, {\"path\": \"$.[2]\", \"columnid\": \"ResourceType\"}, {\"path\": \"$.[3]\", \"columnid\": \"Currency\"}]}}]}",
+              "size": 0,
+              "title": "Actual monthly cost \u2014 table",
+              "queryType": 12,
+              "visualization": "table",
+              "showExportToExcel": true,
+              "gridSettings": {
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "orange"
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "act-table"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "actual"
+      },
+      "name": "group-actual"
+    }
+  ],
+  "isLocked": false,
+  "fallbackResourceIds": [
+    "Azure Monitor"
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

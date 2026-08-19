@@ -1,0 +1,251 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# VM shutdown savings\nWhat a **{HoursPerDay} h/day x {DaysPerWeek} days/week** schedule would save. Production VMs and any VM already tagged `AutoShutdown` are excluded from the numbers.\n\nRate comes from last month's actual VM spend when a cost scope is set, otherwise **{FallbackRate}**/hour."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": [
+          "value::all"
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "parameters": [
+          {
+            "id": "e98fe6da-dd26-4f61-8173-e6637f40eb0b",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "value": [
+              "value::all"
+            ]
+          },
+          {
+            "id": "e07b0201-80fc-4f6d-902b-8eafe00e52f4",
+            "version": "KqlParameterItem/1.0",
+            "name": "CostScope",
+            "label": "Cost scope (optional)",
+            "type": 6,
+            "isRequired": false,
+            "multiSelect": false,
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            }
+          },
+          {
+            "id": "400e6be3-6a25-4d9c-9aef-2e2095c05e18",
+            "version": "KqlParameterItem/1.0",
+            "name": "HoursPerDay",
+            "label": "Hours/day",
+            "type": 1,
+            "isRequired": true,
+            "value": "12"
+          },
+          {
+            "id": "f473dc5d-986d-495f-9bc0-7d0d8b05ef3b",
+            "version": "KqlParameterItem/1.0",
+            "name": "DaysPerWeek",
+            "label": "Days/week",
+            "type": 1,
+            "isRequired": true,
+            "value": "5"
+          },
+          {
+            "id": "208773b5-56c4-442b-9905-825c67360110",
+            "version": "KqlParameterItem/1.0",
+            "name": "FallbackRate",
+            "label": "Fallback rate / VM-hour",
+            "type": 1,
+            "isRequired": true,
+            "value": "0.20"
+          },
+          {
+            "id": "9b54f789-7242-4930-885d-c0fc5d4b151c",
+            "version": "KqlParameterItem/1.0",
+            "name": "LastMonthCost",
+            "label": "Last month VM cost",
+            "type": 1,
+            "isRequired": false,
+            "query": "{\n  \"version\": \"ARMEndpoint/1.0\",\n  \"method\": \"POST\",\n  \"path\": \"{CostScope}/providers/Microsoft.CostManagement/query\",\n  \"apiVersion\": \"2023-03-01\",\n  \"body\": {\n    \"type\": \"ActualCost\",\n    \"timeframe\": \"TheLastMonth\",\n    \"dataset\": {\n      \"granularity\": \"None\",\n      \"aggregation\": {\n        \"totalCost\": {\n          \"name\": \"Cost\",\n          \"function\": \"Sum\"\n        }\n      },\n      \"filter\": {\n        \"dimensions\": {\n          \"name\": \"MeterCategory\",\n          \"operator\": \"In\",\n          \"values\": [\n            \"Virtual Machines\"\n          ]\n        }\n      }\n    }\n  },\n  \"transformers\": [\n    {\n      \"type\": \"jsonpath\",\n      \"settings\": {\n        \"tablePath\": \"$.properties.rows\",\n        \"columns\": [\n          {\n            \"path\": \"$.[0]\",\n            \"columnid\": \"Cost\",\n            \"columnType\": \"real\"\n          }\n        ]\n      }\n    }\n  ]\n}",
+            "queryType": 12,
+            "isHiddenWhenLocked": true
+          },
+          {
+            "id": "72f10de6-ad47-481e-80a1-bf7c4dd954e3",
+            "version": "KqlParameterItem/1.0",
+            "name": "LastMonthHours",
+            "label": "Last month VM hours",
+            "type": 1,
+            "isRequired": false,
+            "query": "{\n  \"version\": \"ARMEndpoint/1.0\",\n  \"method\": \"POST\",\n  \"path\": \"{CostScope}/providers/Microsoft.CostManagement/query\",\n  \"apiVersion\": \"2023-03-01\",\n  \"body\": {\n    \"type\": \"ActualCost\",\n    \"timeframe\": \"TheLastMonth\",\n    \"dataset\": {\n      \"granularity\": \"None\",\n      \"aggregation\": {\n        \"totalQty\": {\n          \"name\": \"UsageQuantity\",\n          \"function\": \"Sum\"\n        }\n      },\n      \"filter\": {\n        \"dimensions\": {\n          \"name\": \"MeterCategory\",\n          \"operator\": \"In\",\n          \"values\": [\n            \"Virtual Machines\"\n          ]\n        }\n      }\n    }\n  },\n  \"transformers\": [\n    {\n      \"type\": \"jsonpath\",\n      \"settings\": {\n        \"tablePath\": \"$.properties.rows\",\n        \"columns\": [\n          {\n            \"path\": \"$.[0]\",\n            \"columnid\": \"Hours\",\n            \"columnType\": \"real\"\n          }\n        ]\n      }\n    }\n  ]\n}",
+            "queryType": 12,
+            "isHiddenWhenLocked": true
+          }
+        ]
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n| extend powerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| extend isRunning = (powerState =~ 'VM running')\n| extend envTag = tostring(tags['Environment'])\n| extend ownerTag = tostring(tags['Owner'])\n| extend isProd = (envTag has 'prod')\n| extend hasSchedule = isnotempty(tostring(tags['AutoShutdown']))\n| extend runHours = iff(isRunning, 730.0, 0.0)\n| extend targetHours = round(todouble('{HoursPerDay}') * round(todouble('{DaysPerWeek}') * 4.345, 1), 0)\n| extend inScope = (isRunning and not(isProd) and not(hasSchedule))\n| extend savedHours = round(iff(inScope, max_of(runHours - targetHours, 0.0), 0.0), 0)\n| extend monthlySaving = round(savedHours * round(iff(isempty('{LastMonthCost}') or todouble('{LastMonthHours}') <= 0.0, todouble('{FallbackRate}'), todouble('{LastMonthCost}') / max_of(todouble('{LastMonthHours}'), 1.0)), 4), 2)\n| summarize ['Virtual machines'] = count(),\n            ['Running now'] = countif(isRunning),\n            ['Can be scheduled'] = countif(inScope),\n            ['Hours saved / month'] = round(sum(savedHours), 0),\n            ['Saving / month'] = round(sum(monthlySaving), 0),\n            ['Saving / year'] = round(sum(monthlySaving) * 12.0, 0)",
+        "size": 3,
+        "title": "Opportunity",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "tiles",
+        "showRefreshButton": true,
+        "noDataMessage": "Nothing to show \u2014 check the Subscriptions picker."
+      },
+      "name": "tiles"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n| extend powerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| extend isRunning = (powerState =~ 'VM running')\n| extend envTag = tostring(tags['Environment'])\n| extend ownerTag = tostring(tags['Owner'])\n| extend isProd = (envTag has 'prod')\n| extend hasSchedule = isnotempty(tostring(tags['AutoShutdown']))\n| extend runHours = iff(isRunning, 730.0, 0.0)\n| extend targetHours = round(todouble('{HoursPerDay}') * round(todouble('{DaysPerWeek}') * 4.345, 1), 0)\n| extend inScope = (isRunning and not(isProd) and not(hasSchedule))\n| extend savedHours = round(iff(inScope, max_of(runHours - targetHours, 0.0), 0.0), 0)\n| extend monthlySaving = round(savedHours * round(iff(isempty('{LastMonthCost}') or todouble('{LastMonthHours}') <= 0.0, todouble('{FallbackRate}'), todouble('{LastMonthCost}') / max_of(todouble('{LastMonthHours}'), 1.0)), 4), 2)| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, subName = name\n) on subscriptionId\n| extend ['Subscription'] = iff(isempty(tostring(subName)), subscriptionId, tostring(subName))\n| summarize ['VMs'] = count(),\n            ['Running'] = countif(isRunning),\n            ['Can be scheduled'] = countif(inScope),\n            ['Hours saved/month'] = round(sum(savedHours), 0),\n            ['Saving / month'] = round(sum(monthlySaving), 0),\n            ['Saving / year'] = round(sum(monthlySaving) * 12.0, 0)\n        by ['Subscription'], ['Subscription id'] = subscriptionId\n| order by ['Saving / month'] desc",
+        "size": 0,
+        "title": "By subscription",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "showRefreshButton": true,
+        "noDataMessage": "Nothing to show \u2014 check the Subscriptions picker.",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Saving / month",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "green"
+              }
+            },
+            {
+              "columnMatch": "Saving / year",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "green"
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Saving / month",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "sub"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n| extend powerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| extend isRunning = (powerState =~ 'VM running')\n| extend envTag = tostring(tags['Environment'])\n| extend ownerTag = tostring(tags['Owner'])\n| extend isProd = (envTag has 'prod')\n| extend hasSchedule = isnotempty(tostring(tags['AutoShutdown']))\n| extend runHours = iff(isRunning, 730.0, 0.0)\n| extend targetHours = round(todouble('{HoursPerDay}') * round(todouble('{DaysPerWeek}') * 4.345, 1), 0)\n| extend inScope = (isRunning and not(isProd) and not(hasSchedule))\n| extend savedHours = round(iff(inScope, max_of(runHours - targetHours, 0.0), 0.0), 0)\n| extend monthlySaving = round(savedHours * round(iff(isempty('{LastMonthCost}') or todouble('{LastMonthHours}') <= 0.0, todouble('{FallbackRate}'), todouble('{LastMonthCost}') / max_of(todouble('{LastMonthHours}'), 1.0)), 4), 2)| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, subName = name\n) on subscriptionId\n| extend ['Subscription'] = iff(isempty(tostring(subName)), subscriptionId, tostring(subName))\n| where inScope\n| project ['VM'] = name, ['Subscription'], ['Resource group'] = resourceGroup,\n          ['Size'] = tostring(properties.hardwareProfile.vmSize),\n          ['Environment'] = iff(isempty(envTag), 'untagged', envTag),\n          ['Owner'] = iff(isempty(ownerTag), 'unassigned', ownerTag),\n          ['Hours now'] = runHours, ['Hours on schedule'] = targetHours,\n          ['Saving / month'] = monthlySaving, ['Saving / year'] = round(monthlySaving * 12.0, 2)\n| order by ['Saving / month'] desc, ['VM'] asc",
+        "size": 0,
+        "title": "VMs to schedule",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "showRefreshButton": true,
+        "noDataMessage": "Nothing to show \u2014 check the Subscriptions picker.",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Saving / month",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "green"
+              }
+            },
+            {
+              "columnMatch": "Saving / year",
+              "formatter": 4,
+              "formatOptions": {
+                "palette": "green"
+              }
+            }
+          ],
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "Saving / month",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "cand"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Stopped but still billing\nThese are *stopped*, not *stopped (deallocated)*, so they still charge for compute. Deallocate them \u2014 no schedule discussion needed."
+      },
+      "name": "stop-t"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n| extend powerState = tostring(properties.extended.instanceView.powerState.displayStatus)\n| extend isRunning = (powerState =~ 'VM running')\n| extend envTag = tostring(tags['Environment'])\n| extend ownerTag = tostring(tags['Owner'])\n| extend isProd = (envTag has 'prod')\n| extend hasSchedule = isnotempty(tostring(tags['AutoShutdown']))\n| extend runHours = iff(isRunning, 730.0, 0.0)\n| extend targetHours = round(todouble('{HoursPerDay}') * round(todouble('{DaysPerWeek}') * 4.345, 1), 0)\n| extend inScope = (isRunning and not(isProd) and not(hasSchedule))\n| extend savedHours = round(iff(inScope, max_of(runHours - targetHours, 0.0), 0.0), 0)\n| extend monthlySaving = round(savedHours * round(iff(isempty('{LastMonthCost}') or todouble('{LastMonthHours}') <= 0.0, todouble('{FallbackRate}'), todouble('{LastMonthCost}') / max_of(todouble('{LastMonthHours}'), 1.0)), 4), 2)| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, subName = name\n) on subscriptionId\n| extend ['Subscription'] = iff(isempty(tostring(subName)), subscriptionId, tostring(subName))\n| where powerState =~ 'VM stopped'\n| project ['VM'] = name, ['Subscription'], ['Resource group'] = resourceGroup,\n          ['Size'] = tostring(properties.hardwareProfile.vmSize),\n          ['Owner'] = iff(isempty(ownerTag), 'unassigned', ownerTag)\n| order by ['Subscription'] asc, ['VM'] asc",
+        "size": 0,
+        "title": "Deallocate these",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "showRefreshButton": true,
+        "noDataMessage": "Nothing to show \u2014 check the Subscriptions picker."
+      },
+      "name": "stopped"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "**Assumptions** \u2014 Running VMs are counted as 24x7 (730 h/month) from their current power state, so a VM already switched off shows no saving. Savings are compute only; disks, public IPs and licences keep billing while a VM is deallocated, and a VM covered by a reservation or savings plan frees nothing unless that commitment is re-applied elsewhere."
+      },
+      "name": "notes"
+    }
+  ],
+  "defaultResourceIds": [],
+  "fallbackResourceIds": [
+    "Azure Monitor"
+  ],
+  "fromTemplateId": "vm-shutdown-savings",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
