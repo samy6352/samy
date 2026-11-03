@@ -132,6 +132,103 @@ function Invoke-Arg {
     return , @($all | Where-Object { $_ })
 }
 
+function Get-DateSafe {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    try { return [datetime]::Parse($Text, [System.Globalization.CultureInfo]::InvariantCulture) } catch { return $null }
+}
+
+function Get-ScalingFloorPct {
+    param([string]$SchedulesJson)
+    $vals = @()
+    foreach ($s in (ConvertFrom-JsonSafe $SchedulesJson)) {
+        foreach ($n in 'rampUpMinimumHostsPct', 'rampDownMinimumHostsPct') {
+            if ($null -ne $s.$n) { $vals += [int]$s.$n }
+        }
+    }
+    if ($vals.Count -eq 0) { return 0 }
+    return ($vals | Measure-Object -Minimum).Minimum
+}
+
+# One-time (per run) lookup of existing reservations and savings plans. Both can fail for lack of
+# permissions; the assessment then reports coverage as unknown instead of assuming zero.
+function Get-CommitmentContext {
+    $ctx = [PSCustomObject]@{
+        Reservations = @(); ReservationsKnown = $false
+        SavingsPlans = @(); SavingsPlansKnown = $false
+    }
+    try {
+        $path = '/providers/Microsoft.Capacity/reservations?api-version=2022-11-01'
+        $all = @()
+        while ($path) {
+            $resp = Invoke-AzRestMethod -Method GET -Path $path -ErrorAction Stop
+            if ($resp.StatusCode -ne 200) { throw "HTTP $($resp.StatusCode) - Reservation Reader or billing access is required" }
+            $body = $resp.Content | ConvertFrom-Json
+            $all += @($body.value)
+            $path = $null
+            if ($body.nextLink) { $path = ([uri]$body.nextLink).PathAndQuery }
+        }
+        $ctx.Reservations = @($all | Where-Object { $_.properties.reservedResourceType -eq 'VirtualMachines' -and $_.properties.displayProvisioningState -eq 'Succeeded' } | ForEach-Object {
+                [PSCustomObject]@{
+                    name = $_.name; location = ([string]$_.location).ToLower(); skuName = $_.sku.name
+                    quantity = [int]$_.properties.quantity; scopeType = $_.properties.appliedScopeType
+                    scopes = (@($_.properties.appliedScopes) -join ','); expiry = [string]$_.properties.expiryDate
+                }
+            })
+        $ctx.ReservationsKnown = $true
+    }
+    catch { Write-Host "  Note: existing reservations could not be read ($($_.Exception.Message.Split("`n")[0])). Coverage will be shown as unknown." -ForegroundColor DarkYellow }    try {
+        $resp = Invoke-AzRestMethod -Method GET -Path '/providers/Microsoft.BillingBenefits/savingsPlans?api-version=2022-11-01' -ErrorAction Stop
+        if ($resp.StatusCode -eq 200) {
+            $plans = @(($resp.Content | ConvertFrom-Json).value)
+            $ctx.SavingsPlans = @($plans | Where-Object { $_.properties.displayProvisioningState -eq 'Succeeded' -or $_.properties.provisioningState -eq 'Succeeded' })
+            $ctx.SavingsPlansKnown = $true
+        }
+        else { Write-Host "  Note: savings plans could not be read (HTTP $($resp.StatusCode)). Coverage will be shown as unknown." -ForegroundColor DarkYellow }
+    }
+    catch { Write-Host "  Note: savings plans could not be read. Coverage will be shown as unknown." -ForegroundColor DarkYellow }
+    return $ctx
+}
+
+# Public Azure Retail Prices API (no auth). Linux compute rate = the part a reservation / savings plan discounts.
+$script:PriceCache = @{}
+function Get-VmRetailPrice {
+    param([string]$Size, [string]$Region)
+    $key = "$Size|$Region".ToLower()
+    if ($script:PriceCache.ContainsKey($key)) { return $script:PriceCache[$key] }
+    $out = $null
+    try {
+        $base = 'https://prices.azure.com/api/retail/prices?api-version=2023-01-01-preview&$filter='
+        $f = "serviceName eq 'Virtual Machines' and armRegionName eq '$Region' and armSkuName eq '$Size' and priceType eq '{0}'"
+        $isStd = { $_.productName -notmatch 'Windows' -and $_.skuName -notmatch 'Spot|Low Priority' -and $_.meterName -notmatch 'Spot|Low Priority' }
+        $cons = @((Invoke-RestMethod -Uri ($base + [uri]::EscapeDataString(($f -f 'Consumption'))) -TimeoutSec 30).Items | Where-Object $isStd) | Select-Object -First 1
+        $res = @((Invoke-RestMethod -Uri ($base + [uri]::EscapeDataString(($f -f 'Reservation'))) -TimeoutSec 30).Items | Where-Object $isStd)
+        if ($cons -and $cons.unitPrice -gt 0) {
+            $payg = [double]$cons.unitPrice
+            $ri1 = $res | Where-Object { $_.reservationTerm -eq '1 Year' } | Select-Object -First 1
+            $ri3 = $res | Where-Object { $_.reservationTerm -eq '3 Years' } | Select-Object -First 1
+            $sp1 = @($cons.savingsPlan) | Where-Object { $_.term -eq '1 Year' } | Select-Object -First 1
+            $sp3 = @($cons.savingsPlan) | Where-Object { $_.term -eq '3 Years' } | Select-Object -First 1
+            $out = [PSCustomObject]@{
+                Payg   = $payg
+                Ri1    = $(if ($ri1) { [double]$ri1.unitPrice / 8760 } else { $null })
+                Ri3    = $(if ($ri3) { [double]$ri3.unitPrice / (8760 * 3) } else { $null })
+                Sp1Pct = $(if ($sp1) { [math]::Round((1 - [double]$sp1.unitPrice / $payg) * 100, 0) } else { $null })
+                Sp3Pct = $(if ($sp3) { [math]::Round((1 - [double]$sp3.unitPrice / $payg) * 100, 0) } else { $null })
+            }
+        }
+    }
+    catch { }
+    $script:PriceCache[$key] = $out
+    return $out
+}
+
+function Test-InAvdRg {
+    param([hashtable]$Rgs, [string]$ResourceId)
+    $k = Get-RgKey $ResourceId
+    return [bool]($k -and $Rgs.ContainsKey($k))
+}
+
 function Get-RgKey {
     param([string]$ResourceId)
     if ($ResourceId -match '^(/subscriptions/[^/]+/resourcegroups/[^/]+)') { return $Matches[1].ToLower() }
@@ -180,7 +277,8 @@ resources
 | where type =~ 'microsoft.desktopvirtualization/scalingplans'
 | project id=tolower(id), name, resourceGroup, subscriptionId,
     planHostPoolType=tostring(properties.hostPoolType),
-    refs=tostring(properties.hostPoolReferences)
+    refs=tostring(properties.hostPoolReferences),
+    schedules=tostring(properties.schedules)
 '@
     AppGroups    = @'
 resources
@@ -241,9 +339,12 @@ resources
     Advisor      = @'
 advisorresources
 | where type =~ 'microsoft.advisor/recommendations'
-| where tostring(properties.category) =~ 'Cost'
 | project id=tolower(id), subscriptionId,
+    category=tostring(properties.category),
     impact=tostring(properties.impact),
+    impactedType=tostring(properties.impactedField),
+    impactedName=tostring(properties.impactedValue),
+    lastUpdated=tostring(properties.lastUpdated),
     resourceId=tolower(tostring(properties.resourceMetadata.resourceId)),
     problem=tostring(properties.shortDescription.problem),
     solution=tostring(properties.shortDescription.solution),
@@ -253,6 +354,27 @@ advisorresources
 }
 
 # ---------------------------------------------------------------- assessment
+
+# Full Advisor list for the subscription (all categories), tagged by AVD relevance
+function New-AdvisorRows {
+    param($Recs, [string]$SubName, [hashtable]$SessionVmIds = @{}, [hashtable]$AvdRgs = @{})
+    $rows = foreach ($r in @($Recs)) {
+        if (-not $r) { continue }
+        $rid = [string]$r.resourceId
+        $rel = 'Other'
+        if ($rid -and $SessionVmIds.ContainsKey($rid)) { $rel = 'AVD session host' }
+        elseif ($rid -and (Test-InAvdRg $AvdRgs $rid)) { $rel = 'AVD resource group' }
+        elseif ($rid -match '^/subscriptions/[^/]+$') { $rel = 'Subscription-wide' }
+        [PSCustomObject]@{
+            Subscription = $SubName; Category = $r.category; Impact = $r.impact; AvdRelevance = $rel
+            ResourceType = $r.impactedType; Resource = $r.impactedName; Problem = $r.problem; Solution = $r.solution
+            EstAnnualSavings = $(if ($r.annualSavings) { [math]::Round($r.annualSavings, 0) } else { $null }); Currency = $r.currency
+            LastUpdated = $r.lastUpdated; ResourceId = $rid
+        }
+    }
+    $rank = @{ 'AVD session host' = 0; 'AVD resource group' = 1; 'Subscription-wide' = 2; 'Other' = 3 }
+    return @($rows | Sort-Object { $rank[$_.AvdRelevance] }, Category, Impact)
+}
 
 function Invoke-AvdAssessment {
     param([Parameter(Mandatory)]$Subscription)
@@ -300,7 +422,7 @@ function Invoke-AvdAssessment {
         Write-Host "  No AVD host pools or session hosts found in this subscription." -ForegroundColor Yellow
         return [PSCustomObject]@{
             Subscription = $subName; SubscriptionId = $subId; Findings = @(); HostPools = @(); SessionHosts = @()
-            ScalingPlans = @(); Storage = @(); Counts = [PSCustomObject]@{ HostPools = 0; SessionHosts = 0; ScalingPlans = 0 }
+            ScalingPlans = @(); Storage = @(); Commitments = @(); AdvisorAll = (New-AdvisorRows -Recs $data.Advisor -SubName $subName); Counts = [PSCustomObject]@{ HostPools = 0; SessionHosts = 0; ScalingPlans = 0 }
         }
     }
 
@@ -321,7 +443,7 @@ function Invoke-AvdAssessment {
             $path = ([string]$r.hostPoolArmPath).ToLower()
             if ($path) {
                 if (-not $scalingByPool.ContainsKey($path)) { $scalingByPool[$path] = @() }
-                $scalingByPool[$path] += [PSCustomObject]@{ Plan = $sp.name; Enabled = [bool]$r.scalingPlanEnabled }
+                $scalingByPool[$path] += [PSCustomObject]@{ Plan = $sp.name; Enabled = [bool]$r.scalingPlanEnabled; FloorPct = (Get-ScalingFloorPct $sp.schedules) }
             }
         }
         if ((ConvertFrom-JsonSafe $sp.refs).Count -eq 0) {
@@ -376,7 +498,13 @@ function Invoke-AvdAssessment {
     }
 
     # ---- Session host / VM checks
-    $alwaysOnGroups = @{}
+    $commitGroups = @{}
+    $poolFloor = @{}
+    foreach ($p in $hostPools) {
+        $pl = @($scalingByPool[$p.id] | Where-Object { $_ -and $_.Enabled })
+        $cnt = @($hostsByPool[$p.id] | Where-Object { $_ }).Count
+        $poolFloor[$p.id] = if ($pl.Count -gt 0 -and $p.hostPoolType -eq 'Pooled') { [int][math]::Floor($cnt * ($pl | Measure-Object FloorPct -Minimum).Minimum / 100) } else { 0 }
+    }
     foreach ($h in $sessionHosts) {
         $pool = $poolById[$h.hostPoolId]
         $poolType = if ($pool) { $pool.hostPoolType } else { '' }
@@ -402,8 +530,8 @@ function Invoke-AvdAssessment {
             elseif ($h.status -in 'Unavailable', 'NeedsAssistance', 'Shutdown', 'UpgradeFailed', 'NoHeartbeat') {
                 Add-Finding 'Compute' 'High' $vm.name $vm.resourceGroup "VM is running but session host status is '$($h.status)', so you pay for a host that cannot serve users." 'Fix the agent/domain-join issue, or deallocate/delete the host.'
             }
-            $hbDate = $null
-            if ($h.lastHeartBeat -and [datetime]::TryParse($h.lastHeartBeat, [ref]$hbDate) -and $hbDate -lt (Get-Date).AddDays(-30)) {
+            $hbDate = Get-DateSafe $h.lastHeartBeat
+            if ($hbDate -and $hbDate -lt (Get-Date).AddDays(-30)) {
                 Add-Finding 'Compute' 'High' $vm.name $vm.resourceGroup "VM is running but the AVD agent last reported on $($hbDate.ToString('yyyy-MM-dd'))." 'Investigate or deallocate; this host is not serving users.'
             }
         }
@@ -421,16 +549,76 @@ function Invoke-AvdAssessment {
             $note = if ($poolType -eq 'Pooled') { 'Pooled hosts are stateless; use an ephemeral OS disk or Standard SSD.' } else { 'Consider Standard SSD for lighter workloads.' }
             Add-Finding 'Storage' 'Medium' $vm.name $vm.resourceGroup "OS disk is $($vm.osDiskSku)." $note
         }
-        if ($vm.priority -ne 'Spot' -and $poolType -eq 'Pooled' -and $ps -eq 'running') {
+        if ($vm.priority -ne 'Spot') {
             $gk = "$($vm.vmSize)|$($vm.location)"
-            if (-not $alwaysOnGroups.ContainsKey($gk)) { $alwaysOnGroups[$gk] = 0 }
-            $alwaysOnGroups[$gk]++
+            if (-not $commitGroups.ContainsKey($gk)) {
+                $commitGroups[$gk] = [PSCustomObject]@{ Size = $vm.vmSize; Region = $vm.location; Total = 0; Fixed = 0; Variable = 0; Windows = 0 }
+            }
+            $g = $commitGroups[$gk]
+            $g.Total++
+            if ($vm.osType -eq 'Windows') { $g.Windows++ }
+            $enabledPlans = @($scalingByPool[$h.hostPoolId] | Where-Object { $_ -and $_.Enabled })
+            if ($enabledPlans.Count -gt 0) {
+                if ($poolType -eq 'Pooled' -and $poolFloor[$h.hostPoolId] -gt 0) { $poolFloor[$h.hostPoolId]--; $g.Fixed++ } else { $g.Variable++ }
+            }
+            elseif ($ps -eq 'running' -and -not ($poolType -eq 'Personal' -and $pool -and $pool.startVMOnConnect)) { $g.Fixed++ }
+            else { $g.Variable++ }
         }
     }
 
-    foreach ($gk in $alwaysOnGroups.Keys) {
-        $parts = $gk -split '\|'
-        Add-Finding 'Commitment' 'Info' "$($parts[0]) in $($parts[1])" '' "$($alwaysOnGroups[$gk]) pooled host(s) running now with this size/region." 'Size reservations or a savings plan to the steady baseline (after autoscale), not the peak.'
+    # ---- Reservation / savings plan analysis (compute)
+    $commitOut = @()
+    $cc = $script:Commit
+    foreach ($g in ($commitGroups.Values | Sort-Object Total -Descending)) {
+        $region = ([string]$g.Region).ToLower().Replace(' ', '')
+        $existing = 0
+        if ($cc -and $cc.ReservationsKnown) {
+            foreach ($rv in $cc.Reservations) {
+                $applies = ($rv.scopeType -eq 'Shared') -or ($rv.scopes -like "*$subId*")
+                $exp = Get-DateSafe $rv.expiry
+                $live = -not ($exp -and $exp -lt (Get-Date))
+                if ($applies -and $live -and $rv.skuName -eq $g.Size -and ([string]$rv.location).Replace(' ', '') -eq $region) { $existing += [int]$rv.quantity }
+            }
+        }
+        $gap = [math]::Max(0, $g.Fixed - $existing)
+        $price = Get-VmRetailPrice -Size $g.Size -Region $region
+        $sav1 = $null; $sav3 = $null
+        if ($price -and $gap -gt 0) {
+            if ($price.Ri1) { $sav1 = [math]::Round($gap * 8760 * ($price.Payg - $price.Ri1), 0) }
+            if ($price.Ri3) { $sav3 = [math]::Round($gap * 8760 * ($price.Payg - $price.Ri3), 0) }
+        }
+        $label = "$($g.Size) in $($g.Region)"
+        if ($gap -gt 0) {
+            $sev = if ($gap -ge 3 -or ($sav1 -and $sav1 -ge 5000)) { 'High' } else { 'Medium' }
+            $est = if ($sav1) { " Est. saving about $([string]::Format('{0:N0}', $sav1)) USD/yr (1-year) or $([string]::Format('{0:N0}', $sav3)) USD/yr (3-year) at list price." } else { '' }
+            $cov = if ($cc.ReservationsKnown) { "$existing existing reservation(s) cover this size/region" } else { 'existing reservation coverage could not be read' }
+            Add-Finding 'Commitment' $sev $label '' "$($g.Fixed) always-on / baseline host(s) run on pay-as-you-go; $cov.$est" "Buy a $($gap)-instance 1- or 3-year Reserved VM Instance for the baseline (instance size flexibility applies within the family). Windows licensing is billed separately; use Hybrid Benefit where eligible." $sav1 'RI analysis'
+        }
+        if ($g.Variable -gt 0) {
+            $spTxt = if ($price -and $price.Sp1Pct) { " Savings plan discount for this size is about $($price.Sp1Pct)% (1-year) / $($price.Sp3Pct)% (3-year) at list price." } else { '' }
+            $sev = if ($g.Variable -ge 3) { 'Medium' } else { 'Low' }
+            Add-Finding 'Commitment' $sev $label '' "$($g.Variable) host(s) have variable demand (autoscaled, on-demand or personal).$spTxt" 'Cover steady spend with reservations and use a Compute Savings Plan only for the hourly spend you are sure to consume across pools; do not size either commitment to peak.' $null 'Savings plan analysis'
+        }
+        $commitOut += [PSCustomObject]@{
+            Subscription = $subName; VmSize = $g.Size; Region = $g.Region; TotalHosts = $g.Total
+            BaselineHosts = $g.Fixed; VariableHosts = $g.Variable; WindowsHosts = $g.Windows
+            ExistingReservations = $(if ($cc.ReservationsKnown) { $existing } else { 'unknown' })
+            ReservationGap = $gap
+            PaygHourlyUSD = $(if ($price) { [math]::Round($price.Payg, 4) } else { $null })
+            Ri1yHourlyUSD = $(if ($price -and $price.Ri1) { [math]::Round($price.Ri1, 4) } else { $null })
+            Ri3yHourlyUSD = $(if ($price -and $price.Ri3) { [math]::Round($price.Ri3, 4) } else { $null })
+            SavingsPlan1yPct = $(if ($price) { $price.Sp1Pct } else { $null })
+            SavingsPlan3yPct = $(if ($price) { $price.Sp3Pct } else { $null })
+            Est1yAnnualSavingsUSD = $sav1; Est3yAnnualSavingsUSD = $sav3
+        }
+    }
+    if ($cc -and $cc.SavingsPlansKnown -and $cc.SavingsPlans.Count -gt 0) {
+        $hr = 0
+        foreach ($sp in $cc.SavingsPlans) { if ($sp.properties.commitment.amount) { $hr += [double]$sp.properties.commitment.amount } }
+        Add-Finding 'Commitment' 'Info' 'Existing savings plans' '' "$($cc.SavingsPlans.Count) active savings plan(s) visible to you, totalling about $([string]::Format('{0:N2}', $hr)) per hour. Scope may include non-AVD workloads." 'Check utilisation in Cost Management before adding more commitment; savings plans are consumed by any eligible compute in scope.' $null 'Savings plan analysis'
+    }
+    elseif ($cc -and -not $cc.SavingsPlansKnown) {
+        Add-Finding 'Commitment' 'Info' 'Existing savings plans' '' 'Existing savings plans could not be read with this identity, so coverage is unknown.' 'Check Cost Management > Reservations / Savings plans (or ask a billing owner) before buying new commitments.' $null 'Savings plan analysis'
     }
 
     # ---- Network: public IPs on session hosts
@@ -453,8 +641,8 @@ function Invoke-AvdAssessment {
     foreach ($s in $data.Snapshots) {
         $rgk = Get-RgKey $s.id
         if (-not $avdRgs.ContainsKey($rgk)) { continue }
-        $cd = $null
-        if ($s.created -and [datetime]::TryParse($s.created, [ref]$cd) -and $cd -lt (Get-Date).AddDays(-30)) {
+        $cd = Get-DateSafe $s.created
+        if ($cd -and $cd -lt (Get-Date).AddDays(-30)) {
             Add-Finding 'Storage' 'Low' $s.name $s.resourceGroup "Snapshot older than 30 days ($($s.sizeGB) GB, created $($cd.ToString('yyyy-MM-dd')))." 'Delete obsolete snapshots, e.g. left over from image builds.'
         }
     }
@@ -476,15 +664,22 @@ function Invoke-AvdAssessment {
 
     # ---- Advisor cost recommendations touching AVD scope
     foreach ($a in $data.Advisor) {
-        if (-not $a.resourceId) { continue }
+        if (-not $a.resourceId -or $a.category -ne 'Cost') { continue }
+        if ($a.resourceId -match '^/subscriptions/[^/]+$' -and $a.problem -match 'reserv|savings plan') {
+            $sv = if ($a.annualSavings) { [math]::Round($a.annualSavings, 0) } else { $null }
+            Add-Finding 'Advisor' 'Info' 'Subscription-wide' '' "$($a.problem) [not AVD-specific; covers all VMs in the subscription]" $a.solution $sv 'Azure Advisor'
+            continue
+        }
         $linked = $sessionVmIds.ContainsKey($a.resourceId)
-        $inRg = $avdRgs.ContainsKey((Get-RgKey $a.resourceId))
+        $inRg = Test-InAvdRg $avdRgs $a.resourceId
         if (-not ($linked -or $inRg)) { continue }
         $sev = switch ($a.impact) { 'High' { 'High' } 'Medium' { 'Medium' } default { 'Low' } }
         $savings = if ($a.annualSavings) { [math]::Round($a.annualSavings, 0) } else { $null }
         $scope = if ($linked) { 'session host' } else { 'AVD resource group' }
         Add-Finding 'Advisor' $sev (($a.resourceId -split '/')[-1]) ((($a.resourceId -split '/')[4])) "$($a.problem) [$scope]" $a.solution $savings 'Azure Advisor'
     }
+
+    $advisorAll = New-AdvisorRows -Recs $data.Advisor -SubName $subName -SessionVmIds $sessionVmIds -AvdRgs $avdRgs
 
     # ---- Output objects
     $hostPoolOut = $hostPools | ForEach-Object {
@@ -518,8 +713,8 @@ function Invoke-AvdAssessment {
 
     return [PSCustomObject]@{
         Subscription = $subName; SubscriptionId = $subId
-        Findings     = @($findings)
-        HostPools    = @($hostPoolOut); SessionHosts = @($hostOut); ScalingPlans = @($planOut); Storage = @($storageOut)
+        Findings     = $findings.ToArray()
+        HostPools    = @($hostPoolOut); SessionHosts = @($hostOut); ScalingPlans = @($planOut); Storage = @($storageOut); Commitments = @($commitOut); AdvisorAll = $advisorAll
         Counts       = [PSCustomObject]@{ HostPools = $hostPools.Count; SessionHosts = $sessionHosts.Count; ScalingPlans = $scalingPlans.Count }
     }
 }
@@ -527,7 +722,12 @@ function Invoke-AvdAssessment {
 function Show-SubscriptionResult {
     param($Result)
     $f = @($Result.Findings)
+    $adv = @($Result.AdvisorAll)
     Write-Host "`n--- $($Result.Subscription): $($Result.Counts.HostPools) host pool(s), $($Result.Counts.SessionHosts) session host(s), $($Result.Counts.ScalingPlans) scaling plan(s) ---" -ForegroundColor Green
+    if ($adv.Count -gt 0) {
+        $bycat = ($adv | Group-Object Category | Sort-Object Count -Descending | ForEach-Object { "$($_.Name) $($_.Count)" }) -join ', '
+        Write-Host "Advisor: $($adv.Count) recommendation(s) in the subscription ($bycat) - see the 'Advisor' sheet." -ForegroundColor Gray
+    }
     if ($f.Count -eq 0) { Write-Host "No findings." -ForegroundColor Green; return }
     foreach ($sev in 'High', 'Medium', 'Low', 'Info') {
         $n = @($f | Where-Object Severity -eq $sev).Count
@@ -542,7 +742,7 @@ function Show-SubscriptionResult {
 
 function Export-Report {
     param([object[]]$Results)
-    $stamp = Get-Date -Format 'yyyy-MM-dd-HHmm'
+    $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
     $order = @{ High = 0; Medium = 1; Low = 2; Info = 3 }
 
     $findings = @($Results | ForEach-Object { $_.Findings }) | Sort-Object { $order[$_.Severity] }, Subscription, Category
@@ -561,9 +761,11 @@ function Export-Report {
     $sheets = [ordered]@{
         Summary      = @($summary)
         Findings     = @($findings)
+        Advisor      = @($Results | ForEach-Object { $_.AdvisorAll })
         HostPools    = @($Results | ForEach-Object { $_.HostPools })
         SessionHosts = @($Results | ForEach-Object { $_.SessionHosts })
         ScalingPlans = @($Results | ForEach-Object { $_.ScalingPlans })
+        Commitments  = @($Results | ForEach-Object { $_.Commitments })
         Storage      = @($Results | ForEach-Object { $_.Storage })
     }
 
@@ -598,6 +800,7 @@ function Export-Report {
 Write-Host "Azure Virtual Desktop (AVD) cost assessment - AVD components only, read-only" -ForegroundColor Cyan
 Initialize-Modules
 Connect-IfNeeded
+$script:Commit = Get-CommitmentContext
 
 $script:AllSubs = Get-AccessibleSubscriptions
 if ($script:AllSubs.Count -eq 0) { throw "No enabled subscriptions are accessible with this account." }
@@ -659,5 +862,12 @@ if ($script:results.Count -gt 0) {
 else {
     Write-Host "No subscriptions were reviewed." -ForegroundColor Yellow
 }
+
+
+
+
+
+
+
 
 

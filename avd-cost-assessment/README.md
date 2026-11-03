@@ -25,7 +25,9 @@ Works in PowerShell 7, Windows PowerShell 5.1 and Azure Cloud Shell. Required mo
 
 ## Access and safety
 
-Needs **Reader** on the subscriptions. Nothing is modified. Queries run against Azure Resource Graph only.
+Needs **Reader** on the subscriptions. Nothing is modified. Queries use Azure Resource Graph, the public Azure Retail Prices API, and read-only reservation / savings plan listings.
+
+Reading existing reservations and savings plans needs Reservation Reader (or billing) access. Without it the script still runs and shows coverage as **unknown** rather than assuming none.
 
 ## What it checks
 
@@ -33,13 +35,14 @@ Needs **Reader** on the subscriptions. Nothing is modified. Queries run against 
 - **Session hosts:** stopped-not-deallocated, idle running hosts, unhealthy or stale hosts, unassigned personal hosts, stale registrations.
 - **Licensing and sizing:** missing Windows licence type (Hybrid Benefit), older VM generations, Premium OS disks, mixed sizes in a pool.
 - **AVD resource groups:** unattached disks, old snapshots, public IPs on session hosts, Premium or geo-redundant FSLogix storage.
-- **Commitments:** reservation / savings plan candidates by VM size and region.
-- **Azure Advisor:** cost recommendations touching session hosts or AVD resource groups.
+- **Commitments (RI and savings plan):** hosts are split into a steady baseline (always-on hosts, plus the minimum-host floor of enabled scaling plans) and variable demand. The baseline is compared with your existing VM reservations, the gap is priced with the public Azure Retail Prices API (1- and 3-year RI savings, savings plan discount %), and variable hosts are flagged as savings plan candidates. Output goes to the `Commitments` sheet.
+- **Azure Advisor:** cost recommendations touching session hosts or AVD resource groups become findings. In addition, **every** Advisor recommendation (Cost, Reliability, Security, Performance, Operational Excellence) for each reviewed subscription is exported to the `Advisor` sheet, tagged as AVD session host / AVD resource group / subscription-wide / other.
 
 ## Report
 
-`Summary`, `Findings` (High to Low), `HostPools`, `SessionHosts`, `ScalingPlans`, `Storage`.
+`Summary`, `Findings` (High to Low), `Advisor`, `Commitments`, `HostPools`, `SessionHosts`, `ScalingPlans`, `Storage`.
 
 ## Limits
 
-Findings are point-in-time configuration checks, not utilisation metrics. Validate licensing entitlement and workload patterns before acting. CPU/memory right-sizing is not covered.
+Findings are point-in-time configuration checks, not utilisation metrics. Commitment savings use pay-as-you-go **list prices** (USD, Linux compute rate, which is what reservations and savings plans discount); your EA/MCA prices and the true baseline will differ, so confirm hourly utilisation in Cost Management before buying. Validate licensing entitlement and workload patterns before acting. CPU/memory right-sizing is not covered.
+
