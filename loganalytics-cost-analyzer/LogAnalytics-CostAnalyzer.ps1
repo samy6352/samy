@@ -550,108 +550,204 @@ function Invoke-WorkspaceAnalysis {
 
 # ---------- HTML report ----------
 function ConvertTo-HtmlText($s) { [System.Net.WebUtility]::HtmlEncode([string]$s) }
-function New-SvgSpark([double[]]$v, [int]$w = 260, [int]$h = 44) {
-    if (-not $v -or $v.Count -lt 2) { return '' }
-    $m = ($v | Measure-Object -Maximum).Maximum; if ($m -le 0) { $m = 1 }
-    $pts = for ($i = 0; $i -lt $v.Count; $i++) { '{0:N1},{1:N1}' -f ($i * $w / ($v.Count - 1)), ($h - 3 - ($v[$i] / $m) * ($h - 8)) }
-    ('<svg width="{0}" height="{1}" viewBox="0 0 {0} {1}"><polyline fill="none" stroke="#2f80ed" stroke-width="2" points="{2}"/><polyline fill="rgba(47,128,237,.12)" stroke="none" points="0,{1} {2} {0},{1}"/></svg>' -f $w, $h, ($pts -join ' '))
+function New-DonutSvg($Segs, [string]$Center, [string]$Sub, [int]$Size = 150) {
+    $total = ($Segs | Measure-Object V -Sum).Sum; if (-not $total) { $total = 1 }
+    $off = 25.0; $arcs = ''
+    foreach ($s in $Segs) {
+        $p = 100.0 * $s.V / $total
+        $arcs += [string]::Format([cultureinfo]::InvariantCulture, '<circle r="15.9155" cx="21" cy="21" fill="none" stroke="{0}" stroke-width="4.5" stroke-dasharray="{1:N2} {2:N2}" stroke-dashoffset="{3:N2}"/>', $s.C, $p, (100 - $p), $off)
+        $off -= $p
+    }
+    '<svg viewBox="0 0 42 42" width="{0}" height="{0}" role="img"><circle r="15.9155" cx="21" cy="21" fill="none" stroke="var(--track)" stroke-width="4.5"/>{1}<text x="21" y="21.8" text-anchor="middle" class="dn">{2}</text><text x="21" y="26.6" text-anchor="middle" class="ds">{3}</text></svg>' -f $Size, $arcs, (ConvertTo-HtmlText $Center), (ConvertTo-HtmlText $Sub)
 }
+function New-RingSvg($Score, [int]$Size = 52) {
+    if ($null -eq $Score) { return ('<div class="ring na" style="width:{0}px;height:{0}px">n/a</div>' -f $Size) }
+    $c = if ($Score -ge 80) { 'var(--good)' } elseif ($Score -ge 50) { 'var(--warn)' } else { 'var(--bad)' }
+    '<svg class="ring" viewBox="0 0 42 42" width="{0}" height="{0}"><circle r="15.9155" cx="21" cy="21" fill="none" stroke="var(--track)" stroke-width="4"/><circle r="15.9155" cx="21" cy="21" fill="none" stroke="{1}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{2} {3}" stroke-dashoffset="25"/><text x="21" y="24.5" text-anchor="middle" class="rn">{2}</text></svg>' -f $Size, $c, [int]$Score, (100 - [int]$Score)
+}
+function New-AreaSvg([double[]]$v, [string[]]$labels, [int]$w = 720, [int]$h = 130) {
+    if (-not $v -or $v.Count -lt 2) { return '' }
+    $ci = [cultureinfo]::InvariantCulture
+    $m = ($v | Measure-Object -Maximum).Maximum; if ($m -le 0) { $m = 1 }
+    $pad = 6; $pts = @(); $dots = ''
+    for ($i = 0; $i -lt $v.Count; $i++) {
+        $x = $i * $w / ($v.Count - 1); $y = $h - $pad - ($v[$i] / $m) * ($h - 2 * $pad - 8)
+        $pts += [string]::Format($ci, '{0:N1},{1:N1}', $x, $y)
+        $dots += [string]::Format($ci, '<circle cx="{0:N1}" cy="{1:N1}" r="6" fill="transparent"><title>{2}: {3:N3} GB</title></circle>', $x, $y, $labels[$i], $v[$i])
+    }
+    $line = $pts -join ' '
+    [string]::Format($ci, '<svg class="area" viewBox="0 0 {0} {1}" preserveAspectRatio="none"><defs><linearGradient id="g{4}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><polygon fill="url(#g{4})" points="0,{1} {2} {0},{1}"/><polyline fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" points="{2}"/>{3}</svg><div class="axis"><span>{5}</span><span>peak {6:N2} GB/day</span><span>{7}</span></div>', $w, $h, $line, $dots, $script:areaId++, $labels[0], $m, $labels[-1])
+}
+function New-MiniSpark([double[]]$v) {
+    if (-not $v -or $v.Count -lt 2) { return '' }
+    $ci = [cultureinfo]::InvariantCulture; $w = 110; $h = 28
+    $m = ($v | Measure-Object -Maximum).Maximum; if ($m -le 0) { $m = 1 }
+    $pts = for ($i = 0; $i -lt $v.Count; $i++) { [string]::Format($ci, '{0:N1},{1:N1}', ($i * $w / ($v.Count - 1)), ($h - 3 - ($v[$i] / $m) * ($h - 6))) }
+    '<svg width="{0}" height="{1}" viewBox="0 0 {0} {1}"><polyline fill="none" stroke="var(--accent)" stroke-width="1.6" points="{2}"/></svg>' -f $w, $h, ($pts -join ' ')
+}
+
 function New-HtmlReport {
-    $sb = New-Object System.Text.StringBuilder
-    $e = { param($x) ConvertTo-HtmlText $x }
-    $tot = ($AllSummary | Measure-Object EstMonthlyUSD -Sum).Sum
-    $sav = ($AllSummary | Measure-Object PotentialSavingUSD -Sum).Sum
-    $savC = [math]::Round($sav + (@($AllFindings | Where-Object { $_.Workspace -like '(consolidation)*' -and $_.CountInTotal }) | Measure-Object EstMonthlySavingUSD -Sum).Sum, 2)
-    $pct = if ($tot -gt 0) { [math]::Round(100 * $savC / $tot) } else { 0 }
-    $high = @($AllFindings | Where-Object Severity -eq 'High').Count
-    $css = @'
-*{box-sizing:border-box}body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#f4f6fa;color:#1b2430}
-header{background:linear-gradient(120deg,#0b1f3a,#12467a 60%,#1b6ec2);color:#fff;padding:28px 40px}
-header h1{margin:0 0 4px;font-size:26px;letter-spacing:.3px}header p{margin:0;opacity:.85;font-size:13px}
-main{padding:24px 40px;max-width:1280px;margin:auto}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:-34px 0 24px}
-.kpi{background:#fff;border-radius:10px;padding:14px 16px;box-shadow:0 2px 10px rgba(16,40,80,.1);border-top:3px solid #2f80ed}
-.kpi b{display:block;font-size:24px}.kpi span{font-size:12px;color:#5b6b7f;text-transform:uppercase;letter-spacing:.5px}
-.kpi.g{border-top-color:#27ae60}.kpi.r{border-top-color:#eb5757}.kpi.y{border-top-color:#f2c94c}
-h2{margin:30px 0 10px;font-size:18px;border-left:4px solid #2f80ed;padding-left:10px}
-table{border-collapse:collapse;width:100%;background:#fff;border-radius:8px;overflow:hidden;font-size:13px;box-shadow:0 1px 6px rgba(16,40,80,.07)}
-th{background:#eef2f8;text-align:left;padding:8px 10px;font-size:12px;color:#40526b;text-transform:uppercase;letter-spacing:.4px}
-td{padding:8px 10px;border-top:1px solid #edf0f5;vertical-align:top}
-.chip{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;color:#fff}
-.High{background:#eb5757}.Medium{background:#f2994a}.Low{background:#2d9cdb}.Info{background:#9aa5b5}
-.save{color:#1e8e4e;font-weight:700;white-space:nowrap}
-.ws{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(16,40,80,.08);padding:18px 22px;margin:18px 0}
-.wshead{display:flex;justify-content:space-between;align-items:center}.wshead h3{margin:0}.wshead small{color:#6b7b90;font-weight:400}
-.score{font-size:22px;font-weight:800;border-radius:50%;width:56px;height:56px;display:flex;align-items:center;justify-content:center;color:#fff}
-.sg{background:#27ae60}.sy{background:#e0a800}.sr{background:#eb5757}.sn{background:#9aa5b5;font-size:13px}
-.mini{display:flex;gap:26px;flex-wrap:wrap;margin:10px 0;font-size:13px;color:#40526b}.mini b{color:#1b2430}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:12px 0}
-.bar{display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0}.bar .n{width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bar .t{flex:1;background:#eaeef5;height:10px;border-radius:5px}.bar .t i{display:block;height:10px;border-radius:5px;background:#2f80ed}
-.bar .v{width:150px;color:#5b6b7f;text-align:right}
-details{margin-top:6px}summary{cursor:pointer;color:#12467a;font-size:12px}
-pre{background:#0f1b2d;color:#d6e4ff;padding:10px 12px;border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin:6px 0 0}
-.note{font-size:12px;color:#5b6b7f}footer{padding:20px 40px;color:#7a899c;font-size:12px}
-@media(max-width:900px){.cols{grid-template-columns:1fr}main,header{padding:18px}}
+    $prevCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+    [System.Threading.Thread]::CurrentThread.CurrentCulture = [cultureinfo]::InvariantCulture
+    try {
+        $script:areaId = 1
+        $e = { param($x) ConvertTo-HtmlText $x }
+        $sb = New-Object System.Text.StringBuilder
+        $sevRank = { @{ High = 0; Medium = 1; Low = 2; Info = 3 }[$_.Severity] }
+        $counted = @($AllFindings | Where-Object { $_.CountInTotal -and $_.Severity -ne 'Info' -and $_.EstMonthlySavingUSD -gt 0 })
+        $tot = [double](($AllSummary | Measure-Object EstMonthlyUSD -Sum).Sum)
+        $sav = [double](($counted | Measure-Object EstMonthlySavingUSD -Sum).Sum)
+        $pct = if ($tot -gt 0) { [math]::Min(100, [math]::Round(100 * $sav / $tot)) } else { 0 }
+        $hi = @($AllFindings | Where-Object Severity -eq 'High').Count; $me = @($AllFindings | Where-Object Severity -eq 'Medium').Count; $lo = @($AllFindings | Where-Object Severity -eq 'Low').Count
+        $subCount = @($AllSummary | Select-Object -ExpandProperty Subscription -Unique).Count
+        $gbTotal = [double](($AllSummary | Measure-Object BillableGB -Sum).Sum)
+        $catColors = @{ 'Pricing' = '#6366f1'; 'Table plan' = '#06b6d4'; 'Collection' = '#10b981'; 'Retention' = '#f59e0b'; 'Anomaly' = '#ef4444'; 'Governance' = '#8b5cf6'; 'Hygiene' = '#64748b' }
+
+        $css = @'
+:root{--bg:#f5f7fb;--card:#fff;--ink:#0f172a;--mute:#64748b;--line:#e6eaf2;--track:#e8edf5;--accent:#2563eb;--accent2:#7c3aed;--good:#16a34a;--warn:#d97706;--bad:#dc2626;--shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06);--code:#0b1220}
+[data-theme=dark]{--bg:#0b1220;--card:#111a2e;--ink:#e6edf7;--mute:#8da0bb;--line:#1d2a44;--track:#1b2740;--accent:#60a5fa;--accent2:#a78bfa;--good:#4ade80;--warn:#fbbf24;--bad:#f87171;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);--code:#070c17}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Segoe UI Variable","Segoe UI",Inter,system-ui,-apple-system,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+nav{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;padding:10px 32px;background:color-mix(in srgb,var(--card) 82%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+nav b{margin-right:auto;font-size:14px;letter-spacing:.2px}nav a{color:var(--mute);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:13px}nav a:hover{background:var(--track);color:var(--ink)}
+button{font:inherit;cursor:pointer}.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:8px}.btn:hover{border-color:var(--accent)}
+.hero{background:radial-gradient(1200px 400px at 85% -20%,#7c3aed55,transparent),linear-gradient(120deg,#0b1f3a,#133a73 55%,#1d5fd1);color:#fff;padding:44px 32px 86px}
+.wrap{max-width:1240px;margin:0 auto}.hero .wrap{display:grid;grid-template-columns:1fr auto;gap:32px;align-items:center}
+.eyebrow{text-transform:uppercase;letter-spacing:1.6px;font-size:11px;opacity:.75}.hero h1{margin:6px 0 10px;font-size:34px;line-height:1.15;letter-spacing:-.5px}
+.big{font-size:56px;font-weight:800;letter-spacing:-1.5px;line-height:1}.big small{font-size:18px;font-weight:500;opacity:.8;letter-spacing:0}
+.sub{opacity:.85;margin-top:8px}.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.chip{font-size:12px;padding:4px 10px;border-radius:999px;background:#ffffff1f;border:1px solid #ffffff33}
+.hero .dn{fill:#fff;font-size:8px;font-weight:800}.hero .ds{fill:#cfe0ff;font-size:2.6px}
+main{margin-top:-58px;padding:0 32px 40px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--k,var(--accent))}
+.kpi span{display:block;font-size:11.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.7px}.kpi b{display:block;font-size:26px;letter-spacing:-.5px;margin-top:2px}.kpi i{font-style:normal;font-size:12px;color:var(--mute)}
+h2{font-size:18px;margin:36px 0 12px;letter-spacing:-.2px;display:flex;align-items:center;gap:10px}h2:after{content:"";flex:1;height:1px;background:var(--line)}
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}@media(max-width:960px){.grid2,.hero .wrap{grid-template-columns:1fr}.big{font-size:42px}nav{padding:10px 16px}main,.hero{padding-left:16px;padding-right:16px}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 12px;font-size:14px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+.hbar{display:grid;grid-template-columns:200px 1fr 92px;gap:10px;align-items:center;margin:9px 0;font-size:13px}.hbar .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar .t{height:10px;background:var(--track);border-radius:6px;overflow:hidden}.hbar .t i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2))}.hbar .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--mute)}
+.legend{display:grid;gap:8px;font-size:13px}.legend div{display:flex;align-items:center;gap:8px}.legend i{width:10px;height:10px;border-radius:3px;flex:none}.legend em{margin-left:auto;font-style:normal;font-weight:700;font-variant-numeric:tabular-nums}
+.donut{display:flex;gap:20px;align-items:center;flex-wrap:wrap}.dn{fill:var(--ink);font-size:6px;font-weight:800}.ds{fill:var(--mute);font-size:2.6px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.win{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}.win .amt{color:var(--good);font-weight:800;font-size:20px}.win .ttl{font-weight:600;margin:2px 0}.win .ws{color:var(--mute);font-size:12px}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:999px;color:#fff;vertical-align:middle}
+.t-High{background:var(--bad)}.t-Medium{background:var(--warn)}.t-Low{background:#0ea5e9}.t-Info{background:#94a3b8}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:8px 10px;border-bottom:1px solid var(--line)}td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}tr:last-child td{border-bottom:0}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.good{color:var(--good);font-weight:700}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.toolbar input{flex:1;min-width:200px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit}
+.pill{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:999px;font-size:12.5px}.pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
+details.ws{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:12px 0;box-shadow:var(--shadow)}
+details.ws>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:56px 1.6fr 120px 110px 110px 24px;gap:14px;align-items:center;padding:14px 18px}
+details.ws>summary::-webkit-details-marker{display:none}details.ws>summary:after{content:"\25B8";color:var(--mute);transition:transform .15s}details[open].ws>summary:after{transform:rotate(90deg)}
+.wn b{display:block;font-size:15px}.wn small{color:var(--mute)}.col small{display:block;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px}.col b{font-variant-numeric:tabular-nums}
+.ring .rn{fill:var(--ink);font-size:11px;font-weight:800}.ring.na{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--track);color:var(--mute);font-size:11px}
+.body{padding:4px 18px 18px;border-top:1px solid var(--line)}.mini{display:flex;flex-wrap:wrap;gap:22px;margin:12px 0;color:var(--mute);font-size:12.5px}.mini b{color:var(--ink)}
+.area{width:100%;height:130px;display:block}.axis{display:flex;justify-content:space-between;color:var(--mute);font-size:11px;margin-top:2px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:14px 0}@media(max-width:960px){.two{grid-template-columns:1fr}details.ws>summary{grid-template-columns:48px 1fr 24px}.col{display:none}}
+.trow{display:grid;grid-template-columns:150px 1fr 270px;gap:10px;align-items:center;font-size:12.5px;margin:6px 0}.trow .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.trow .t{height:8px;background:var(--track);border-radius:5px}.trow .t i{display:block;height:100%;border-radius:5px;background:var(--accent)}.trow .v{color:var(--mute);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.badge{font-size:10px;padding:1px 6px;border-radius:6px;background:var(--track);color:var(--mute);margin-left:4px}
+.f{border:1px solid var(--line);border-left:4px solid var(--c);border-radius:12px;padding:12px 14px;margin:10px 0;background:var(--card)}
+.f.High{--c:var(--bad)}.f.Medium{--c:var(--warn)}.f.Low{--c:#0ea5e9}.f.Info{--c:#94a3b8}
+.fh{display:flex;gap:10px;align-items:flex-start}.fh .ft{font-weight:650;flex:1}.fh .sv{color:var(--good);font-weight:800;white-space:nowrap}.fm{color:var(--mute);font-size:12px;margin-top:2px}.fd{margin-top:6px}
+.how{margin-top:8px}.how summary{cursor:pointer;color:var(--accent);font-size:12.5px}.how pre{position:relative;margin:8px 0 0;background:var(--code);color:#cfe3ff;padding:12px 14px;border-radius:10px;font:12px/1.5 Cascadia Code,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.copy{position:absolute;top:8px;right:8px;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #ffffff30;background:#ffffff12;color:#cfe3ff}
+.note{color:var(--mute);font-size:12.5px}ul.note li{margin:4px 0}code{background:var(--track);padding:1px 5px;border-radius:5px}
+footer{padding:24px 32px 48px;color:var(--mute);font-size:12px;text-align:center}.empty{padding:26px;text-align:center;color:var(--mute)}
+@media print{nav,.toolbar,.copy{display:none}.hero{padding-bottom:40px}main{margin-top:0}details.ws .body{display:block}body{background:#fff}}
 '@
-    [void]$sb.AppendLine('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Log Analytics Cost Intelligence</title><style>' + $css + '</style></head><body>')
-    [void]$sb.AppendLine(('<header><h1>Log Analytics Cost Intelligence</h1><p>Generated {0:yyyy-MM-dd HH:mm} &middot; window: last {1} days &middot; currency: USD &middot; PAYG basis {2}/GB &middot; table matrix: {3}</p></header><main>' -f (Get-Date), $Days, (Format-Usd $script:Price), (& $e $FeatureMatrix.Source)))
-    [void]$sb.AppendLine(('<div class="kpis"><div class="kpi"><b>{0}</b><span>Subscriptions</span></div><div class="kpi"><b>{1}</b><span>Workspaces</span></div><div class="kpi y"><b>{2}</b><span>Est. monthly spend</span></div><div class="kpi g"><b>{3}</b><span>Potential saving / month ({4}%)</span></div><div class="kpi r"><b>{5}</b><span>High-priority findings</span></div></div>' -f @($AllSummary | Select-Object -ExpandProperty Subscription -Unique).Count, $AllSummary.Count, (Format-Usd $tot), (Format-Usd $savC), $pct, $high))
+        $js = @'
+(function(){var d=document,r=d.documentElement,t=localStorage.getItem('lat');if(t)r.dataset.theme=t;else if(matchMedia('(prefers-color-scheme:dark)').matches)r.dataset.theme='dark';
+d.getElementById('th').onclick=function(){r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';localStorage.setItem('lat',r.dataset.theme)};
+var sev='all',q='';function apply(){d.querySelectorAll('details.ws').forEach(function(w){var any=0,name=(w.dataset.name||'').toLowerCase();
+w.querySelectorAll('.f').forEach(function(f){var ok=(sev==='all'||f.dataset.sev===sev)&&(!q||(f.textContent.toLowerCase().indexOf(q)>-1||name.indexOf(q)>-1));f.style.display=ok?'':'none';if(ok)any++});
+var nm=!q||name.indexOf(q)>-1;w.style.display=(any||(sev==='all'&&nm&&!w.querySelector('.f')))?'':'none';if(q&&any&&sev!=='all')w.open=true});}
+d.querySelectorAll('.pill[data-sev]').forEach(function(b){b.onclick=function(){d.querySelectorAll('.pill[data-sev]').forEach(function(x){x.classList.remove('on')});b.classList.add('on');sev=b.dataset.sev;apply()}});
+var s=d.getElementById('q');if(s)s.oninput=function(){q=s.value.toLowerCase();apply()};
+var ex=d.getElementById('ex');if(ex)ex.onclick=function(){var o=ex.dataset.o!=='1';d.querySelectorAll('details.ws').forEach(function(w){w.open=o});ex.dataset.o=o?'1':'0';ex.textContent=o?'Collapse all':'Expand all'};
+d.querySelectorAll('.copy').forEach(function(b){b.onclick=function(){var c=b.parentNode.querySelector('code').textContent;navigator.clipboard.writeText(c).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1400)})}});
+addEventListener('beforeprint',function(){d.querySelectorAll('details').forEach(function(x){x.open=true})});})();
+'@
+        [void]$sb.AppendLine('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Log Analytics Cost Intelligence</title><style>' + $css + '</style></head><body>')
+        [void]$sb.AppendLine('<nav><b>&#9670; Log Analytics Cost Intelligence</b><a href="#summary">Summary</a><a href="#wins">Quick wins</a><a href="#opps">Opportunities</a><a href="#workspaces">Workspaces</a><a href="#method">Method</a><button class="btn" id="th" title="Toggle theme">&#9680; Theme</button><button class="btn" onclick="print()">Print / PDF</button></nav>')
 
-    # Top opportunities
-    $top = @($AllFindings | Where-Object { $_.CountInTotal -and $_.EstMonthlySavingUSD -gt 0 } | Sort-Object EstMonthlySavingUSD -Descending | Select-Object -First 10)
-    [void]$sb.AppendLine('<h2>Top savings opportunities</h2>')
-    if ($top.Count) {
-        [void]$sb.AppendLine('<table><tr><th>#</th><th>Saving / mo</th><th>Priority</th><th>Workspace</th><th>Opportunity</th><th>Effort</th></tr>')
-        $n = 0; foreach ($f in $top) { $n++; [void]$sb.AppendLine(('<tr><td>{0}</td><td class="save">{1}</td><td><span class="chip {2}">{2}</span></td><td>{3}</td><td>{4}</td><td>{5}</td></tr>' -f $n, (Format-Usd $f.EstMonthlySavingUSD), $f.Severity, (& $e $f.Workspace), (& $e $f.Title), $f.Effort)) }
-        [void]$sb.AppendLine('</table><p class="note">Savings are indicative and not strictly additive (e.g. a pricing-tier change is evaluated on current volume).</p>')
-    }
-    else { [void]$sb.AppendLine('<p class="note">No quantified savings found above the materiality threshold - the environment looks efficient.</p>') }
+        # ---- hero ----
+        $donut = New-DonutSvg @(@{ V = $pct; C = '#5eead4' }, @{ V = (100 - $pct); C = '#ffffff30' }) ("$pct%") 'of spend' 170
+        $metaChips = ('<span class="chip">{0}-day window</span><span class="chip">PAYG {1}/GB</span><span class="chip">{2} workspaces</span><span class="chip">{3} subscription(s)</span><span class="chip">Table matrix: {4}</span><span class="chip">{5:yyyy-MM-dd HH:mm}</span>' -f $Days, (Format-Usd $script:Price), $AllSummary.Count, $subCount, (& $e $FeatureMatrix.Source), (Get-Date))
+        [void]$sb.AppendLine(@"
+<header class="hero" id="summary"><div class="wrap"><div><div class="eyebrow">Azure Monitor &middot; Cost optimisation assessment</div><h1>Potential saving identified</h1>
+<div class="big">$(Format-Usd $sav)<small> / month</small></div><div class="sub">&asymp; $(Format-Usd ($sav * 12)) per year &middot; $pct% of an estimated $(Format-Usd $tot) monthly Log Analytics spend</div><div class="chips">$metaChips</div></div><div>$donut</div></div></header>
+<main><div class="wrap">
+<div class="kpis">
+<div class="kpi" style="--k:#2563eb"><span>Est. monthly spend</span><b>$(Format-Usd $tot)</b><i>$([math]::Round($gbTotal,1)) GB billable in window</i></div>
+<div class="kpi" style="--k:#16a34a"><span>Potential saving</span><b>$(Format-Usd $sav)</b><i>$(Format-Usd ($sav*12)) annualised</i></div>
+<div class="kpi" style="--k:#dc2626"><span>High priority</span><b>$hi</b><i>$me medium &middot; $lo low</i></div>
+<div class="kpi" style="--k:#7c3aed"><span>Workspaces</span><b>$($AllSummary.Count)</b><i>$subCount subscription(s)</i></div>
+</div>
+"@)
 
-    # League table
-    [void]$sb.AppendLine('<h2>Workspace league table</h2><table><tr><th>Subscription</th><th>Workspace</th><th>Region</th><th>SKU</th><th>GB</th><th>Avg GB/day</th><th>Est. $/mo</th><th>Saving $/mo</th><th>Score</th></tr>')
-    foreach ($s in ($AllSummary | Sort-Object EstMonthlyUSD -Descending)) {
-        [void]$sb.AppendLine(('<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}{4}</td><td>{5:N2}</td><td>{6:N3}</td><td>{7}</td><td class="save">{8}</td><td>{9}</td></tr>' -f (& $e $s.Subscription), (& $e $s.Workspace), $s.Location, $s.Sku, $(if ($s.CommitmentGBPerDay) { " ($($s.CommitmentGBPerDay) GB/d)" } else { '' }), $s.BillableGB, $s.AvgGBPerDay, (Format-Usd $s.EstMonthlyUSD), (Format-Usd $s.PotentialSavingUSD), $(if ($null -ne $s.EfficiencyScore) { $s.EfficiencyScore } else { 'n/a' })))
-    }
-    [void]$sb.AppendLine('</table>')
+        # ---- where the money goes ----
+        $topSpend = @($AllSummary | Sort-Object EstMonthlyUSD -Descending | Select-Object -First 8)
+        $maxSpend = [double](($topSpend | Measure-Object EstMonthlyUSD -Maximum).Maximum); if ($maxSpend -le 0) { $maxSpend = 1 }
+        $bars = ($topSpend | ForEach-Object { '<div class="hbar"><span class="n" title="{0}">{0}</span><span class="t"><i style="width:{1:N1}%"></i></span><span class="v">{2}</span></div>' -f (& $e $_.Workspace), (100 * $_.EstMonthlyUSD / $maxSpend), (Format-Usd $_.EstMonthlyUSD) }) -join ''
+        $cats = @($counted | Group-Object Category | ForEach-Object { [pscustomobject]@{ Name = $_.Name; V = ($_.Group | Measure-Object EstMonthlySavingUSD -Sum).Sum } } | Sort-Object V -Descending)
+        $segs = @($cats | ForEach-Object { @{ V = $_.V; C = $(if ($catColors[$_.Name]) { $catColors[$_.Name] } else { '#64748b' }) } })
+        $legend = ($cats | ForEach-Object { '<div><i style="background:{0}"></i>{1}<em>{2}</em></div>' -f $(if ($catColors[$_.Name]) { $catColors[$_.Name] } else { '#64748b' }), (& $e $_.Name), (Format-Usd $_.V) }) -join ''
+        $catBlock = if ($cats.Count) { '<div class="donut">' + (New-DonutSvg $segs (Format-Usd $sav) 'per month' 150) + '<div class="legend" style="flex:1;min-width:150px">' + $legend + '</div></div>' } else { '<div class="empty">No quantified savings above the materiality threshold.</div>' }
+        [void]$sb.AppendLine(('<h2>Where the money goes</h2><div class="grid2"><div class="card"><h3>Estimated monthly spend by workspace</h3>{0}</div><div class="card"><h3>Savings by category</h3>{1}</div></div>' -f $bars, $catBlock))
 
-    # Cross-workspace findings
-    $cross = @($AllFindings | Where-Object { $_.Workspace -like '(consolidation)*' })
-    if ($cross.Count) {
-        [void]$sb.AppendLine('<h2>Cross-workspace opportunities</h2><table><tr><th>Priority</th><th>Scope</th><th>Opportunity</th><th>Saving / mo</th></tr>')
-        foreach ($f in $cross) { [void]$sb.AppendLine(('<tr><td><span class="chip {0}">{0}</span></td><td>{1}</td><td><b>{2}</b><br>{3}</td><td class="save">{4}</td></tr>' -f $f.Severity, (& $e $f.Workspace), (& $e $f.Title), (& $e $f.Detail), (Format-Usd $f.EstMonthlySavingUSD))) }
-        [void]$sb.AppendLine('</table>')
-    }
+        # ---- quick wins / strategic ----
+        $ranked = @($counted | Sort-Object EstMonthlySavingUSD -Descending)
+        $quick = @($ranked | Where-Object { $_.Effort -eq 'Low' } | Select-Object -First 6)
+        $strat = @($ranked | Where-Object { $_.Effort -ne 'Low' } | Select-Object -First 6)
+        $card = { param($f) '<div class="win"><div class="amt">{0}<span class="note"> /mo</span></div><div class="ttl">{1}</div><div class="ws">{2} &middot; {3} effort</div></div>' -f (Format-Usd $f.EstMonthlySavingUSD), (& $e $f.Title), (& $e $f.Workspace), $f.Effort }
+        [void]$sb.AppendLine('<h2 id="wins">Quick wins <span class="note">low effort, configuration only</span></h2>')
+        if ($quick.Count) { [void]$sb.AppendLine('<div class="cards">' + (($quick | ForEach-Object { & $card $_ }) -join '') + '</div>') } else { [void]$sb.AppendLine('<div class="card empty">No low-effort quantified savings.</div>') }
+        if ($strat.Count) { [void]$sb.AppendLine('<h2>Strategic initiatives <span class="note">needs validation or change control</span></h2><div class="cards">' + (($strat | ForEach-Object { & $card $_ }) -join '') + '</div>') }
 
-    # Workspace details
-    [void]$sb.AppendLine('<h2>Workspace details</h2>')
-    foreach ($s in ($AllSummary | Sort-Object EstMonthlyUSD -Descending)) {
-        $key = "$($s.Workspace) [$($s.ResourceGroup)]"
-        $sc = $s.EfficiencyScore; $scCls = if ($null -eq $sc) { 'sn' } elseif ($sc -ge 80) { 'sg' } elseif ($sc -ge 50) { 'sy' } else { 'sr' }
-        [void]$sb.AppendLine(('<section class="ws"><div class="wshead"><h3>{0} <small>{1} &middot; {2} &middot; {3}</small></h3><div class="score {4}">{5}</div></div>' -f (& $e $s.Workspace), (& $e $s.ResourceGroup), $s.Location, (& $e $s.Subscription), $scCls, $(if ($null -ne $sc) { $sc } else { 'n/a' })))
-        [void]$sb.AppendLine(('<div class="mini"><span>SKU <b>{0}{1}</b></span><span>Retention <b>{2}d</b></span><span>Daily cap <b>{3}</b></span><span>Ingested <b>{4:N2} GB</b></span><span>Peak <b>{5:N2} GB</b> ({6})</span><span>Est. <b>{7}/mo</b></span><span>Saving <b class="save">{8}/mo</b></span></div>' -f $s.Sku, $(if ($s.CommitmentGBPerDay) { " ($($s.CommitmentGBPerDay) GB/d)" } else { '' }), $s.RetentionDays, $s.DailyCap, $s.BillableGB, $s.PeakGB, $s.PeakDay, (Format-Usd $s.EstMonthlyUSD), (Format-Usd $s.PotentialSavingUSD)))
-        if ($s.BillableGB -gt 0) {
-            [void]$sb.AppendLine('<div class="cols"><div><div class="note">Daily analytics ingestion (GB)</div>' + (New-SvgSpark $s.Daily) + '<div style="margin-top:8px" class="note">Top tables</div>')
-            foreach ($t in $s.TopTables) { [void]$sb.AppendLine(('<div class="bar"><span class="n" title="{0}">{0}</span><span class="t"><i style="width:{1}%"></i></span><span class="v">{1}% &middot; {2:N3} GB &middot; {3} &middot; {4}</span></div>' -f (& $e $t.Table), $t.PctOfTotal, $t.IngestedGB, (Format-Usd $t.EstMonthlyUSD), $t.Plan)) }
-            [void]$sb.AppendLine('</div><div><div class="note">Top resources (7 days)</div>')
-            if ($s.TopResources.Count) { foreach ($r in $s.TopResources) { [void]$sb.AppendLine(('<div class="bar"><span class="n" title="{0}">{1}</span><span class="v" style="flex:1">{2:N3} GB &middot; {3}</span></div>' -f (& $e $r.ResourceId), (& $e $r.Resource), $r.GB7d, (& $e $r.Tables))) } }
-            else { [void]$sb.AppendLine('<div class="note">Not collected.</div>') }
-            [void]$sb.AppendLine('</div></div>')
+        # ---- opportunities table ----
+        $cross = @($AllFindings | Where-Object { $_.Workspace -like '(consolidation)*' })
+        $top = @($ranked | Select-Object -First 12)
+        [void]$sb.AppendLine('<h2 id="opps">Top opportunities</h2><div class="card">')
+        if ($top.Count) {
+            [void]$sb.AppendLine('<table><tr><th>#</th><th>Priority</th><th>Opportunity</th><th>Workspace</th><th class="num">Saving / mo</th><th>Effort</th></tr>')
+            $n = 0; foreach ($f in $top) { $n++; [void]$sb.AppendLine(('<tr><td>{0}</td><td><span class="tag t-{1}">{1}</span></td><td><b>{2}</b></td><td>{3}</td><td class="num good">{4}</td><td>{5}</td></tr>' -f $n, $f.Severity, (& $e $f.Title), (& $e $f.Workspace), (Format-Usd $f.EstMonthlySavingUSD), $f.Effort)) }
+            [void]$sb.AppendLine('</table><p class="note">Indicative and not strictly additive. Pricing-tier savings are evaluated on the volume remaining after table-level optimisations.</p>')
         }
-        $fs = @($AllFindings | Where-Object { $_.Workspace -eq $key } | Sort-Object @{ e = { @{ High = 0; Medium = 1; Low = 2; Info = 3 }[$_.Severity] } }, @{ e = 'EstMonthlySavingUSD'; Descending = $true })
-        if ($fs.Count) {
-            [void]$sb.AppendLine('<table><tr><th>Priority</th><th>Category</th><th>Finding</th><th>Saving / mo</th><th>Effort</th></tr>')
-            foreach ($f in $fs) {
-                $act = if ($f.Action) { '<details><summary>How to implement</summary><pre>' + (& $e $f.Action) + '</pre></details>' } else { '' }
-                [void]$sb.AppendLine(('<tr><td><span class="chip {0}">{0}</span></td><td>{1}</td><td><b>{2}</b><br>{3}{4}</td><td class="save">{5}</td><td>{6}</td></tr>' -f $f.Severity, $f.Category, (& $e $f.Title), (& $e $f.Detail), $act, $(if ($f.EstMonthlySavingUSD -gt 0) { Format-Usd $f.EstMonthlySavingUSD } else { '-' }), $f.Effort))
+        else { [void]$sb.AppendLine('<div class="empty">The environment looks efficient - nothing above the materiality threshold.</div>') }
+        [void]$sb.AppendLine('</div>')
+        if ($cross.Count) {
+            [void]$sb.AppendLine('<h2>Cross-workspace opportunities</h2>')
+            foreach ($f in $cross) { [void]$sb.AppendLine(('<div class="f {0}"><div class="fh"><span class="tag t-{0}">{0}</span><span class="ft">{1}</span><span class="sv">{2}/mo</span></div><div class="fm">{3}</div><div class="fd">{4}</div></div>' -f $f.Severity, (& $e $f.Title), (Format-Usd $f.EstMonthlySavingUSD), (& $e $f.Workspace), (& $e $f.Detail))) }
+        }
+
+        # ---- workspaces ----
+        [void]$sb.AppendLine('<h2 id="workspaces">Workspace deep-dive</h2><div class="toolbar"><input id="q" type="search" placeholder="Search workspaces, tables, findings..."><button class="pill on" data-sev="all">All</button><button class="pill" data-sev="High">High</button><button class="pill" data-sev="Medium">Medium</button><button class="pill" data-sev="Low">Low</button><button class="btn" id="ex" data-o="0">Expand all</button></div>')
+        $order = 0
+        foreach ($s in ($AllSummary | Sort-Object @{ e = 'PotentialSavingUSD'; Descending = $true }, @{ e = 'EstMonthlyUSD'; Descending = $true })) {
+            $order++; $key = "$($s.Workspace) [$($s.ResourceGroup)]"
+            $open = if ($order -le 2 -and ($s.PotentialSavingUSD -gt 0)) { ' open' } else { '' }
+            [void]$sb.AppendLine(('<details class="ws" data-name="{0}"{1}><summary><div>{2}</div><div class="wn"><b>{3}</b><small>{4} &middot; {5} &middot; {6}</small></div><div>{7}</div><div class="col"><small>Spend / mo</small><b>{8}</b></div><div class="col"><small>Saving / mo</small><b class="good">{9}</b></div></summary><div class="body">' -f (& $e "$($s.Workspace) $($s.ResourceGroup) $($s.Subscription)"), $open, (New-RingSvg $s.EfficiencyScore), (& $e $s.Workspace), (& $e $s.ResourceGroup), $s.Location, (& $e $s.Subscription), (New-MiniSpark $s.Daily), (Format-Usd $s.EstMonthlyUSD), (Format-Usd $s.PotentialSavingUSD)))
+            [void]$sb.AppendLine(('<div class="mini"><span>SKU <b>{0}{1}</b></span><span>Retention <b>{2}d</b></span><span>Daily cap <b>{3}</b></span><span>Ingested <b>{4:N2} GB</b></span><span>Avg <b>{5:N3} GB/day</b></span><span>Peak <b>{6:N2} GB</b> ({7})</span></div>' -f $s.Sku, $(if ($s.CommitmentGBPerDay) { " ($($s.CommitmentGBPerDay) GB/d)" } else { '' }), $s.RetentionDays, $s.DailyCap, $s.BillableGB, $s.AvgGBPerDay, $s.PeakGB, $s.PeakDay))
+            if ($s.BillableGB -gt 0) {
+                $tbars = ($s.TopTables | ForEach-Object { '<div class="trow"><span class="n" title="{0}">{0}</span><span class="t"><i style="width:{1}%"></i></span><span class="v">{1}% &middot; {2:N3} GB &middot; {3}<span class="badge">{4}</span></span></div>' -f (& $e $_.Table), $_.PctOfTotal, $_.IngestedGB, (Format-Usd $_.EstMonthlyUSD), $_.Plan }) -join ''
+                $rbars = if ($s.TopResources.Count) { ($s.TopResources | ForEach-Object { '<div class="trow" style="grid-template-columns:1fr 130px"><span class="n" title="{0}">{1}</span><span class="v">{2:N3} GB</span></div>' -f (& $e $_.ResourceId), (& $e $_.Resource), $_.GB7d }) -join '' } else { '<div class="note">Not collected.</div>' }
+                [void]$sb.AppendLine(('<div class="note">Daily analytics ingestion</div>{0}<div class="two"><div><div class="note">Top tables</div>{1}</div><div><div class="note">Top resources (7 days)</div>{2}</div></div>' -f (New-AreaSvg $s.Daily $s.DayLabels), $tbars, $rbars))
             }
-            [void]$sb.AppendLine('</table>')
+            $fs = @($AllFindings | Where-Object { $_.Workspace -eq $key } | Sort-Object @{ e = $sevRank }, @{ e = 'EstMonthlySavingUSD'; Descending = $true })
+            foreach ($f in $fs) {
+                $act = if ($f.Action) { '<details class="how"><summary>How to implement</summary><pre><button class="copy">Copy</button><code>' + (& $e $f.Action) + '</code></pre></details>' } else { '' }
+                [void]$sb.AppendLine(('<div class="f {0}" data-sev="{0}"><div class="fh"><span class="tag t-{0}">{0}</span><span class="ft">{1}</span>{2}</div><div class="fm">{3} &middot; {4} effort</div><div class="fd">{5}</div>{6}</div>' -f $f.Severity, (& $e $f.Title), $(if ($f.EstMonthlySavingUSD -gt 0 -and $f.Severity -ne 'Info') { '<span class="sv">' + (Format-Usd $f.EstMonthlySavingUSD) + '/mo</span>' } else { '' }), $f.Category, $f.Effort, (& $e $f.Detail), $act))
+            }
+            [void]$sb.AppendLine('</div></details>')
         }
-        [void]$sb.AppendLine('</section>')
+
+        # ---- method ----
+        [void]$sb.AppendLine(('<h2 id="method">Method and assumptions</h2><div class="card"><ul class="note"><li>Billable ingestion comes from the workspace <code>Usage</code> table (UTC calendar days, last {0} days). All costs in USD.</li><li>Analytics ingestion priced at {1}/GB (pay-as-you-go) or the commitment-tier effective rate. Tier discounts are approximated at 15-30% (100-5000 GB/day) and evaluated against <b>actual daily volumes</b>; days below the commitment still bill the full tier.</li><li>Basic ~{2}/GB, Auxiliary ~{3}/GB, extended interactive retention ~{4}/GB-month, archive ~{5}/GB-month (list prices scaled to your pay-as-you-go rate).</li><li>Basic/Auxiliary eligibility follows Microsoft''s published table feature matrix ({6}). Basic has trade-offs: no alerts, limited KQL, 30-day interactive retention and a per-GB query charge.</li><li>Free retention: 31 days for Analytics tables, 90 days for Application Insights tables.</li><li>Findings are indicative. Validate in Azure Cost Management and the Azure pricing calculator before changing production workspaces.</li></ul><p class="note">Sources: Microsoft Learn - Azure Monitor cost optimization best practices, Log Analytics cost calculations, table plans, table feature support.</p></div></div></main><footer>Log Analytics Cost Intelligence v{7} &middot; read-only analysis &middot; generated {8:yyyy-MM-dd HH:mm}</footer><script>{9}</script></body></html>' -f $Days, (Format-Usd $script:Price), (Format-Usd ($BasicListPerGB * $script:Scale)), (Format-Usd ($AuxListPerGB * $script:Scale)), (Format-Usd ($RetentionListPerGBMonth * $script:Scale)), (Format-Usd ($ArchiveListPerGBMonth * $script:Scale)), (& $e $FeatureMatrix.Source), $script:Version, (Get-Date), $js))
+        $sb.ToString()
     }
-    $paygTxt = Format-Usd $script:Price
-    [void]$sb.AppendLine(('<h2>Method and assumptions</h2><ul class="note"><li>Billable ingestion from the workspace <code>Usage</code> table (UTC days, last {0} days). Costs shown in USD.</li><li>Analytics ingestion priced at {1}/GB (pay-as-you-go) or the commitment-tier effective rate; tier discounts approximated at 15-30% (100-5000 GB/day) and evaluated against <b>actual daily volumes</b> (days below the commitment still pay the commitment).</li><li>Basic ~{2}/GB, Auxiliary ~{3}/GB, interactive retention beyond free period ~{4}/GB-month, archive ~{5}/GB-month (list prices scaled to your PAYG rate).</li><li>Basic/Auxiliary eligibility comes from Microsoft''s published table feature matrix ({6}).</li><li>Free retention: 31 days for Analytics tables, 90 days for Application Insights tables.</li><li>Estimates are indicative. Validate in Azure Cost Management and the Azure pricing calculator before changing production workspaces.</li></ul><p class="note">Sources: Microsoft Learn - Azure Monitor cost optimization, Log Analytics cost calculations, table plans and table feature support.</p></main><footer>Log Analytics Cost Intelligence v{7}</footer></body></html>' -f $Days, $paygTxt, (Format-Usd ($BasicListPerGB * $script:Scale)), (Format-Usd ($AuxListPerGB * $script:Scale)), (Format-Usd ($RetentionListPerGBMonth * $script:Scale)), (Format-Usd ($ArchiveListPerGBMonth * $script:Scale)), (& $e $FeatureMatrix.Source), $script:Version))
-    $sb.ToString()
+    finally { [System.Threading.Thread]::CurrentThread.CurrentCulture = $prevCulture }
 }
 
 if ($env:LA_COSTANALYZER_NOMAIN) { return }
