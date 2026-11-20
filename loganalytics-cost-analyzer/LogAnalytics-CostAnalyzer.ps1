@@ -776,7 +776,11 @@ $subs = @(Invoke-Step 'Discovering subscriptions' { Get-AzSubscription -WarningA
 if (-not $subs.Count) { throw 'No enabled subscriptions found for this account.' }
 if ($AllSubscriptions) { $chosen = $subs }
 elseif ($SubscriptionId) { $chosen = @($subs | Where-Object { $SubscriptionId -contains $_.Id -or $SubscriptionId -contains $_.Name }); if (-not $chosen.Count) { throw 'None of the requested subscriptions were found.' } }
-else { $chosen = @(Select-Interactive -Items $subs -Label { "{0}   ({1})" -f $_.Name, $_.Id } -Title ("Select subscription(s) to analyse - {0} available" -f $subs.Count) -Multi) }
+else {
+    $allEntry = [pscustomobject]@{ Name = ('★ ALL SUBSCRIPTIONS  ({0} enabled)' -f $subs.Count); Id = '*'; IsAll = $true }
+    $picked = @(Select-Interactive -Items (@($allEntry) + $subs) -Label { if ($_.IsAll) { $_.Name } else { "{0}   ({1})" -f $_.Name, $_.Id } } -Title ("Select subscription(s) - first entry analyses ALL ({0} available)" -f $subs.Count) -Multi)
+    $chosen = if ($picked | Where-Object { $_.IsAll }) { $subs } else { $picked }
+}
 if (-not $chosen.Count) { Write-Line '  Nothing selected.' 'Yellow'; return }
 Write-Host ('  ✔ {0} subscription(s) selected' -f $chosen.Count) -ForegroundColor Green
 
